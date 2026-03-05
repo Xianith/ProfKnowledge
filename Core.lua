@@ -237,13 +237,20 @@ function PK:ScanAllProfessions()
 end
 
 function PK:IsBetterScan(newScan, oldScan)
-    -- Prefer scans with actual tree data
+    -- Prefer higher variant IDs — newer expansions always have higher IDs.
+    -- This ensures Midnight variants beat TWW, which beats Dragon Isles, etc.
+    local newVID = newScan.variantID or newScan.skillLineID or 0
+    local oldVID = oldScan.variantID or oldScan.skillLineID or 0
+    if newVID ~= oldVID then
+        return newVID > oldVID
+    end
+    -- Same variant: prefer scans with actual tree data
     local newHasTabs = newScan.tabs and next(newScan.tabs) ~= nil
     local oldHasTabs = oldScan.tabs and next(oldScan.tabs) ~= nil
     if newHasTabs and not oldHasTabs then return true end
     if not newHasTabs and oldHasTabs then return false end
-    -- Prefer higher skill levels (more recent expansion)
-    return (newScan.skillLevel or 0) >= (oldScan.skillLevel or 0)
+    -- Same variant, same tab status: prefer higher skill level
+    return (newScan.skillLevel or 0) > (oldScan.skillLevel or 0)
 end
 
 ----------------------------------------------------------------------
