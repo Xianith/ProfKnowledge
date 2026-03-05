@@ -336,10 +336,8 @@ function PK:RefreshSummaryWindow()
 
     local filterProfession = summaryFrame.selectedProfession
 
-    -- Get characters with Midnight expansion filter (hardcoded).
-    -- This excludes professions with a known non-Midnight expansion name.
-    -- Professions with nil expansionName pass through (need rescan).
-    local chars = self:GetAllCharacters("Midnight", nil)
+    -- Get all characters (old expansions like Dragon Isles are auto-excluded)
+    local chars = self:GetAllCharacters()
 
     -- Apply profession filter: only show characters that have the selected profession
     if filterProfession then
@@ -354,7 +352,7 @@ function PK:RefreshSummaryWindow()
 
     local charCount = #chars
 
-    local subtitleText = charCount .. " character(s)  |cffffd700Midnight|r"
+    local subtitleText = charCount .. " character(s)"
     if filterProfession then
         local profInfo = PK.ProfessionData[filterProfession]
         local profName = profInfo and profInfo.name or "?"

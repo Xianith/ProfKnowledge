@@ -155,80 +155,37 @@ function PK:GetAllCharactersForProfession(skillLineID, filterVariantID)
     return results
 end
 
---- Get all expansion names for the dropdown.
---- Merges the hardcoded PK.KnownExpansions with any discovered from scans.
---- Returns a sorted list like { "Midnight", "The War Within", ... }
-function PK:GetAvailableExpansions()
-    local seen = {}
-    local list = {}
-
-    -- Start with hardcoded known expansions
-    if PK.KnownExpansions then
-        for _, expName in ipairs(PK.KnownExpansions) do
-            if not seen[expName] then
-                seen[expName] = true
-                table.insert(list, expName)
-            end
-        end
-    end
-
-    -- Merge in any expansions discovered from character data
-    if self.db and self.db.characters then
-        for _, charData in pairs(self.db.characters) do
-            if charData.professions then
-                for _, profData in pairs(charData.professions) do
-                    local exp = profData.expansionName
-                    if exp and exp ~= "" and not seen[exp] then
-                        seen[exp] = true
-                        table.insert(list, exp)
-                    end
-                end
-            end
-        end
-    end
-
-    table.sort(list)
-    return list
-end
-
 --- Get all characters and their professions (for summary window).
---- filterExpansion: if given, only professions matching that expansion are included.
+--- Automatically excludes professions from old expansions (PK.ExcludedExpansions).
 --- filterProfession: if given (a skillLineID), only that profession is included.
 --- Returns: { { charKey, className, classID, level, professions = { [skillLineID] = profData, ... } }, ... }
-function PK:GetAllCharacters(filterExpansion, filterProfession)
+function PK:GetAllCharacters(filterProfession)
     local results = {}
     if not self.db or not self.db.characters then return results end
-
-    local hasFilter = filterExpansion or filterProfession
 
     for charKey, charData in pairs(self.db.characters) do
         local profs = charData.professions or {}
 
-        if hasFilter then
-            local filtered = {}
-            for skillLineID, profData in pairs(profs) do
-                local keep = true
-                -- Expansion filter: exclude professions explicitly from a DIFFERENT expansion.
-                -- Professions without a known expansionName pass through (legacy data
-                -- needs a rescan via /pk scan to populate the expansion field).
-                if filterExpansion then
-                    if profData.expansionName and profData.expansionName ~= filterExpansion then
-                        keep = false
-                    end
-                end
-                -- Profession filter
-                if filterProfession and skillLineID ~= filterProfession then
-                    keep = false
-                end
-                if keep then
-                    filtered[skillLineID] = profData
-                end
+        -- Always filter out old-expansion professions and apply profession filter
+        local filtered = {}
+        for skillLineID, profData in pairs(profs) do
+            local keep = true
+            -- Exclude professions from old expansions (e.g. Dragon Isles)
+            if profData.expansionName and PK.ExcludedExpansions[profData.expansionName] then
+                keep = false
             end
-            profs = filtered
+            -- Profession filter
+            if filterProfession and skillLineID ~= filterProfession then
+                keep = false
+            end
+            if keep then
+                filtered[skillLineID] = profData
+            end
         end
+        profs = filtered
 
-        -- Only include character if they have at least one matching profession
-        if not hasFilter or next(profs) then
+        -- Only include character if they have at least one profession after filtering
+        if next(profs) then
             table.insert(results, {
                 charKey     = charKey,
                 className   = charData.className,

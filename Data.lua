@@ -120,11 +120,10 @@ PK.ExpansionDisplayNames = {
     -- Midnight prefix will be auto-discovered; add mapping here if needed
 }
 
---- Hardcoded list of expansions guaranteed to appear in the dropdown,
---- even before any character data is scanned.
-PK.KnownExpansions = {
-    "Midnight",
-    "The War Within",
+--- Old expansions to exclude from the summary window.
+--- Professions tagged with these expansion names are filtered out.
+PK.ExcludedExpansions = {
+    ["Dragon Isles"] = true,
 }
 
 ----------------------------------------------------------------------
