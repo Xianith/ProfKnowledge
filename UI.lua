@@ -861,6 +861,8 @@ end
 local overlayFrame = nil
 
 function PK:InitOverlay()
+    -- Disabled for now; will revisit later
+    do return end
     if overlayFrame then return end
 
     local profFrame = ProfessionsFrame
@@ -939,6 +941,8 @@ function PK:InitOverlay()
 end
 
 function PK:RefreshOverlay()
+    -- Disabled for now; will revisit later
+    do return end
     if not overlayFrame then return end
 
     local scrollChild = overlayFrame.scrollChild
@@ -1140,40 +1144,43 @@ function PK:BuildAltNodeLookup(baseSkillLineID, filterVariantID)
     local lookup = {}
     if not self.db or not self.db.characters then return lookup end
 
+    local currentKey = self.charKey
     for charKey, charData in pairs(self.db.characters) do
-        local profData = charData.professions and charData.professions[baseSkillLineID]
-        if profData and profData.tabs then
-            -- Only include data from matching expansion variant (e.g. Midnight vs TWW).
-            -- If the stored data has no variantID (legacy / imported), treat as wildcard match.
-            local variantMatch = (not filterVariantID)
-                or (not profData.variantID)
-                or (profData.variantID == filterVariantID)
-                or (profData.skillLineID and profData.skillLineID == filterVariantID)
-            if not variantMatch then
-                PK:Debug("BuildAltNodeLookup: skipping " .. charKey
-                    .. " variant=" .. tostring(profData.variantID)
-                    .. " (want " .. tostring(filterVariantID) .. ")")
-            end
-            if variantMatch then
-            for _, tabData in pairs(profData.tabs) do
-                if tabData.nodes then
-                    for _, node in ipairs(tabData.nodes) do
-                        if node.name and node.currentRank and node.currentRank > 0 then
-                            local key = node.name:lower()
-                            if not lookup[key] then
-                                lookup[key] = {}
+        if charKey ~= currentKey then
+            local profData = charData.professions and charData.professions[baseSkillLineID]
+            if profData and profData.tabs then
+                -- Only include data from matching expansion variant (e.g. Midnight vs TWW).
+                -- If the stored data has no variantID (legacy / imported), treat as wildcard match.
+                local variantMatch = (not filterVariantID)
+                    or (not profData.variantID)
+                    or (profData.variantID == filterVariantID)
+                    or (profData.skillLineID and profData.skillLineID == filterVariantID)
+                if not variantMatch then
+                    PK:Debug("BuildAltNodeLookup: skipping " .. charKey
+                        .. " variant=" .. tostring(profData.variantID)
+                        .. " (want " .. tostring(filterVariantID) .. ")")
+                end
+                if variantMatch then
+                    for _, tabData in pairs(profData.tabs) do
+                        if tabData.nodes then
+                            for _, node in ipairs(tabData.nodes) do
+                                if node.name and node.currentRank and node.currentRank > 0 then
+                                    local key = node.name:lower()
+                                    if not lookup[key] then
+                                        lookup[key] = {}
+                                    end
+                                    table.insert(lookup[key], {
+                                        charKey   = charKey,
+                                        className = charData.className,
+                                        rank      = node.currentRank,
+                                        maxRanks  = node.maxRanks,
+                                    })
+                                end
                             end
-                            table.insert(lookup[key], {
-                                charKey   = charKey,
-                                className = charData.className,
-                                rank      = node.currentRank,
-                                maxRanks  = node.maxRanks,
-                            })
                         end
                     end
                 end
             end
-            end  -- if variantMatch
         end
     end
 
@@ -1307,7 +1314,7 @@ function PK:UpdateSpecTreeHighlights()
                         if not button.pkHighlight then
                             local glow = button:CreateTexture(nil, "OVERLAY", nil, 7)
                             glow:SetPoint("CENTER", 0, 0)
-                            local size = (math.min(button:GetWidth(), button:GetHeight()) + 6) * 0.90
+                            local size = (math.min(button:GetWidth(), button:GetHeight()) + 6) * 0.85
                             glow:SetSize(size, size)
                             glow:SetTexture("Interface\\CHARACTERFRAME\\TempPortraitAlphaMask")
                             glow:SetVertexColor(0, 1, 0, 0.35)
@@ -1329,22 +1336,34 @@ function PK:UpdateSpecTreeHighlights()
 
                                 GameTooltip:AddLine(" ")
                                 GameTooltip:AddLine("|cff00ccffAlt Knowledge:|r")
+                                local currentKey = PK.charKey
                                 for _, alt in ipairs(self.pkAltData) do
+                                    -- Skip the current character
+                                    if alt.charKey ~= currentKey then
                                     local cc = PK.ClassColors[alt.className] or "|cffffffff"
                                     local name = alt.charKey:match("^(.-)%-") or alt.charKey
+                                    -- Adjust for free unlock rank so displayed values
+                                    -- are divisible by 5 (Blizzard reports maxRanks+1)
+                                    local displayMax = alt.maxRanks
+                                    local displayRank = alt.rank
+                                    if displayMax % 5 ~= 0 then
+                                        displayMax = displayMax - 1
+                                        displayRank = math.max(displayRank - 1, 0)
+                                    end
                                     local rankColor
-                                    if alt.rank >= alt.maxRanks then
+                                    if displayRank >= displayMax then
                                         rankColor = "|cff00ff00"   -- green = maxed
-                                    elseif alt.rank > 0 then
+                                    elseif displayRank > 0 then
                                         rankColor = "|cffffd700"   -- gold  = partial
                                     else
                                         rankColor = "|cff555555"
                                     end
                                     GameTooltip:AddDoubleLine(
                                         cc .. name .. "|r",
-                                        rankColor .. alt.rank .. "/" .. alt.maxRanks .. "|r",
+                                        rankColor .. displayRank .. "/" .. displayMax .. "|r",
                                         1, 1, 1
                                     )
+                                    end  -- if not current char
                                 end
                                 GameTooltip:Show()
                             end)
