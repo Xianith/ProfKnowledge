@@ -406,20 +406,18 @@ function PK:RefreshSummaryWindow()
     end
     summaryFrame.subtitle:SetText(subtitleText)
 
-    -- Sort professions by display order (for determining main prof order)
+    -- Sort professions by display order
     local orderMap = {}
     for i, id in ipairs(PK.ProfessionOrder) do
         orderMap[id] = i
     end
 
-    -- Fixed 5-column layout:
-    -- Col 1: Main Prof 1 (varies per character)
-    -- Col 2: Main Prof 2 (varies per character)
-    -- Col 3: Cooking (185)
-    -- Col 4: Fishing (356)
-    -- Col 5: Archaeology (794)
+    -- Dynamic column layout:
+    -- One column per main profession that ANY character has data for,
+    -- plus fixed columns for Cooking, Fishing, Archaeology.
+    -- This ensures characters who switched professions show ALL stored data.
     local NAME_COL_WIDTH   = 130
-    local MAIN_COL_WIDTH   = 110   -- wider to fit "Alch 40/45"
+    local MAIN_COL_WIDTH   = 70    -- each main prof gets a named column
     local SEC_COL_WIDTH    = 70
     local ROW_HEIGHT       = 22
 
@@ -427,7 +425,23 @@ function PK:RefreshSummaryWindow()
     local FISHING_ID       = 356
     local ARCHAEOLOGY_ID   = 794
 
-    local totalWidth = NAME_COL_WIDTH + (2 * MAIN_COL_WIDTH) + (3 * SEC_COL_WIDTH)
+    -- First pass: determine which main professions exist across ALL characters
+    local mainProfSet = {}
+    local mainProfCols = {}  -- ordered list of skillLineIDs for column headers
+    for _, char in ipairs(chars) do
+        for skillLineID in pairs(char.professions) do
+            if not PK.SecondaryProfessions[skillLineID] and not mainProfSet[skillLineID] then
+                mainProfSet[skillLineID] = true
+                table.insert(mainProfCols, skillLineID)
+            end
+        end
+    end
+    -- Sort columns by profession display order
+    table.sort(mainProfCols, function(a, b)
+        return (orderMap[a] or 999) < (orderMap[b] or 999)
+    end)
+
+    local totalWidth = NAME_COL_WIDTH + (#mainProfCols * MAIN_COL_WIDTH) + (3 * SEC_COL_WIDTH)
     summaryFrame:SetWidth(math.max(520, totalWidth + 70))
 
     -- Clear old content
@@ -450,15 +464,17 @@ function PK:RefreshSummaryWindow()
     end
     scrollChild.children = {}
 
-    -- Column headers
+    -- Column headers — dynamic main prof columns + fixed secondary columns
     local headers = {
         { text = "Character", width = NAME_COL_WIDTH, justify = "LEFT" },
-        { text = "Prof 1",    width = MAIN_COL_WIDTH, justify = "CENTER" },
-        { text = "Prof 2",    width = MAIN_COL_WIDTH, justify = "CENTER" },
-        { text = "Cook",      width = SEC_COL_WIDTH,  justify = "CENTER" },
-        { text = "Fish",      width = SEC_COL_WIDTH,  justify = "CENTER" },
-        { text = "Arch",      width = SEC_COL_WIDTH,  justify = "CENTER" },
     }
+    for _, skillLineID in ipairs(mainProfCols) do
+        local shortName = PK.ProfessionShortNames[skillLineID] or "?"
+        table.insert(headers, { text = shortName, width = MAIN_COL_WIDTH, justify = "CENTER" })
+    end
+    table.insert(headers, { text = "Cook", width = SEC_COL_WIDTH, justify = "CENTER" })
+    table.insert(headers, { text = "Fish", width = SEC_COL_WIDTH, justify = "CENTER" })
+    table.insert(headers, { text = "Arch", width = SEC_COL_WIDTH, justify = "CENTER" })
 
     local xCursor = 4
     for _, hdr in ipairs(headers) do
@@ -509,52 +525,30 @@ function PK:RefreshSummaryWindow()
         nameText:SetText(nameStr)
         table.insert(scrollChild.children, nameText)
 
-        -- Determine this character's main professions (not cooking/fishing/archaeology)
-        local mainProfs = {}
-        for skillLineID, profData in pairs(char.professions) do
-            if not PK.SecondaryProfessions[skillLineID] then
-                table.insert(mainProfs, { id = skillLineID, data = profData })
-            end
-        end
-        -- Sort main profs by display order
-        table.sort(mainProfs, function(a, b)
-            return (orderMap[a.id] or 999) < (orderMap[b.id] or 999)
-        end)
-
-        -- Columns: Prof 1, Prof 2, Cook, Fish, Arch
+        -- Dynamic main profession columns
         local xPos = 4 + NAME_COL_WIDTH
 
-        -- Prof 1
-        local prof1 = mainProfs[1]
-        local prof1Text = prof1
-            and FormatProfCell(prof1.data, true)
-            or "|cff333333—|r"
-        CreateGridCell(scrollChild, xPos, yOffset, MAIN_COL_WIDTH, ROW_HEIGHT,
-            prof1Text, char.charKey, prof1 and prof1.id or 0, prof1 and prof1.data or nil)
-        xPos = xPos + MAIN_COL_WIDTH
+        for _, skillLineID in ipairs(mainProfCols) do
+            local profData = char.professions[skillLineID]
+            local cellText = profData
+                and FormatProfCell(profData, false)
+                or "|cff333333—|r"
+            CreateGridCell(scrollChild, xPos, yOffset, MAIN_COL_WIDTH, ROW_HEIGHT,
+                cellText, char.charKey, skillLineID, profData)
+            xPos = xPos + MAIN_COL_WIDTH
+        end
 
-        -- Prof 2
-        local prof2 = mainProfs[2]
-        local prof2Text = prof2
-            and FormatProfCell(prof2.data, true)
-            or "|cff333333—|r"
-        CreateGridCell(scrollChild, xPos, yOffset, MAIN_COL_WIDTH, ROW_HEIGHT,
-            prof2Text, char.charKey, prof2 and prof2.id or 0, prof2 and prof2.data or nil)
-        xPos = xPos + MAIN_COL_WIDTH
-
-        -- Cooking
+        -- Fixed secondary profession columns: Cooking, Fishing, Archaeology
         local cookData = char.professions[COOKING_ID]
         CreateGridCell(scrollChild, xPos, yOffset, SEC_COL_WIDTH, ROW_HEIGHT,
             FormatProfCell(cookData, false), char.charKey, COOKING_ID, cookData)
         xPos = xPos + SEC_COL_WIDTH
 
-        -- Fishing
         local fishData = char.professions[FISHING_ID]
         CreateGridCell(scrollChild, xPos, yOffset, SEC_COL_WIDTH, ROW_HEIGHT,
             FormatProfCell(fishData, false), char.charKey, FISHING_ID, fishData)
         xPos = xPos + SEC_COL_WIDTH
 
-        -- Archaeology
         local archData = char.professions[ARCHAEOLOGY_ID]
         CreateGridCell(scrollChild, xPos, yOffset, SEC_COL_WIDTH, ROW_HEIGHT,
             FormatProfCell(archData, false), char.charKey, ARCHAEOLOGY_ID, archData)
