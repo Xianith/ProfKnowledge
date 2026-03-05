@@ -502,6 +502,10 @@ local function SetupProfessionUI()
     if PK.InitOverlay then
         PK:InitOverlay()
     end
+
+    if PK.SetupSpecTreeOverlay then
+        PK:SetupSpecTreeOverlay()
+    end
 end
 
 ----------------------------------------------------------------------
@@ -527,20 +531,30 @@ f:SetScript("OnEvent", function(_, event, name)
         end
 
     elseif event == "TRADE_SKILL_SHOW" then
-        -- Profession window opened — best time to scan
+        -- Profession window opened -- best time to scan
         C_Timer.After(0.5, function()
             PK:DeepScanCurrentProfession()
             if PK.profFrameReady and PK.RefreshOverlay then
                 PK:RefreshOverlay()
             end
+            if PK.profFrameReady and PK.UpdateSpecTreeHighlights then
+                C_Timer.After(0.5, function()
+                    PK:UpdateSpecTreeHighlights()
+                end)
+            end
         end)
 
     elseif event == "TRADE_SKILL_LIST_UPDATE" then
-        -- Profession data has fully loaded — good time for deep scan
+        -- Profession data has fully loaded -- good time for deep scan
         C_Timer.After(0.5, function()
             PK:DeepScanCurrentProfession()
             if PK.profFrameReady and PK.RefreshOverlay then
                 PK:RefreshOverlay()
+            end
+            if PK.profFrameReady and PK.UpdateSpecTreeHighlights then
+                C_Timer.After(0.5, function()
+                    PK:UpdateSpecTreeHighlights()
+                end)
             end
         end)
 
@@ -550,6 +564,11 @@ f:SetScript("OnEvent", function(_, event, name)
             PK:ScanAllProfessions()
             if PK.profFrameReady and PK.RefreshOverlay then
                 PK:RefreshOverlay()
+            end
+            if PK.profFrameReady and PK.UpdateSpecTreeHighlights then
+                C_Timer.After(0.5, function()
+                    PK:UpdateSpecTreeHighlights()
+                end)
             end
         end)
 

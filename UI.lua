@@ -960,6 +960,279 @@ function PK:RefreshOverlay()
 end
 
 ----------------------------------------------------------------------
+-- Spec Tree Node Highlights
+-- Green-tint nodes that alts have invested in, and append alt data
+-- to each node's tooltip on hover.
+----------------------------------------------------------------------
+
+local specTreeHooked    = false
+local cachedAltNodeData = nil   -- { [lowerNodeName] = { {charKey,className,rank,maxRanks}, ... } }
+local cachedProfBaseID  = nil
+
+--- Build a table of every node that ANY other character has points in
+--- for a given base profession.
+function PK:BuildAltNodeLookup(baseSkillLineID)
+    local lookup = {}
+    if not self.db or not self.db.characters then return lookup end
+
+    for charKey, charData in pairs(self.db.characters) do
+        local profData = charData.professions and charData.professions[baseSkillLineID]
+        if profData and profData.tabs then
+            for _, tabData in pairs(profData.tabs) do
+                if tabData.nodes then
+                    for _, node in ipairs(tabData.nodes) do
+                        if node.name and node.currentRank and node.currentRank > 0 then
+                            local key = node.name:lower()
+                            if not lookup[key] then
+                                lookup[key] = {}
+                            end
+                            table.insert(lookup[key], {
+                                charKey   = charKey,
+                                className = charData.className,
+                                rank      = node.currentRank,
+                                maxRanks  = node.maxRanks,
+                            })
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    return lookup
+end
+
+--- Determine the base and variant profession IDs from the currently
+--- open profession frame / spec page.
+function PK:GetSpecPageProfessionIDs()
+    local profFrame = ProfessionsFrame
+    if not profFrame then return nil, nil end
+
+    local baseID    = nil
+    local variantID = nil
+
+    if profFrame.professionInfo then
+        baseID    = profFrame.professionInfo.parentProfessionID
+                    or profFrame.professionInfo.professionID
+        variantID = profFrame.professionInfo.professionID
+    end
+
+    -- Fallback via C_TradeSkillUI
+    if not variantID then
+        pcall(function()
+            local info = C_TradeSkillUI.GetChildProfessionInfo()
+            if info then
+                variantID = info.professionID
+                baseID    = info.parentProfessionID or variantID
+            end
+        end)
+    end
+
+    return baseID, variantID
+end
+
+--- Collect every visible node button inside the spec page.
+local function CollectNodeButtons()
+    local specPage = ProfessionsFrame and ProfessionsFrame.SpecPage
+    if not specPage then return {} end
+
+    local buttons = {}
+
+    -- Method 1: TalentButtonCollection (used by the talent-tree mixin)
+    if specPage.TalentButtonCollection then
+        pcall(function()
+            for button in specPage.TalentButtonCollection:EnumerateActive() do
+                if button.GetNodeID then
+                    table.insert(buttons, button)
+                end
+            end
+        end)
+    end
+
+    -- Method 2: walk immediate children
+    if #buttons == 0 then
+        local children = { specPage:GetChildren() }
+        for _, child in ipairs(children) do
+            if child.GetNodeID then
+                table.insert(buttons, child)
+            end
+        end
+    end
+
+    -- Method 3: walk deeper — some frames nest the buttons
+    if #buttons == 0 then
+        local children = { specPage:GetChildren() }
+        for _, child in ipairs(children) do
+            if child.GetChildren then
+                local grandchildren = { child:GetChildren() }
+                for _, gc in ipairs(grandchildren) do
+                    if gc.GetNodeID then
+                        table.insert(buttons, gc)
+                    end
+                end
+            end
+        end
+    end
+
+    return buttons
+end
+
+--- Apply / refresh green highlights on every node button.
+function PK:UpdateSpecTreeHighlights()
+    local specPage = ProfessionsFrame and ProfessionsFrame.SpecPage
+    if not specPage or not specPage:IsShown() then return end
+
+    local baseID, variantID = self:GetSpecPageProfessionIDs()
+    if not baseID or not variantID then
+        PK:Debug("Spec highlights: no profession IDs found")
+        return
+    end
+
+    -- Rebuild the cache when the profession changes
+    if baseID ~= cachedProfBaseID then
+        cachedAltNodeData = self:BuildAltNodeLookup(baseID)
+        cachedProfBaseID  = baseID
+        PK:Debug("Spec highlights: rebuilt cache for baseID " .. tostring(baseID))
+    end
+
+    -- Obtain the configID for this variant so we can resolve node names
+    local configID = nil
+    pcall(function()
+        configID = C_ProfSpecs.GetConfigIDForSkillLine(variantID)
+    end)
+    if not configID then
+        PK:Debug("Spec highlights: no configID for variant " .. tostring(variantID))
+        return
+    end
+
+    local buttons = CollectNodeButtons()
+    PK:Debug("Spec highlights: processing " .. #buttons .. " node buttons")
+
+    for _, button in ipairs(buttons) do
+        local nodeID = button:GetNodeID()
+        if nodeID then
+            local nodeInfo = nil
+            pcall(function()
+                nodeInfo = C_Traits.GetNodeInfo(configID, nodeID)
+            end)
+
+            if nodeInfo then
+                local nodeName = self:ResolveNodeName(configID, nodeInfo)
+
+                if nodeName then
+                    local altData = cachedAltNodeData[nodeName:lower()]
+
+                    if altData and #altData > 0 then
+                        -- ---- green highlight ----
+                        if not button.pkHighlight then
+                            local glow = button:CreateTexture(nil, "OVERLAY", nil, 7)
+                            glow:SetPoint("TOPLEFT", -3, 3)
+                            glow:SetPoint("BOTTOMRIGHT", 3, -3)
+                            glow:SetColorTexture(0, 1, 0, 0.3)
+                            glow:SetBlendMode("ADD")
+                            button.pkHighlight = glow
+                        end
+                        button.pkHighlight:Show()
+
+                        -- Store lookup data on the button for the tooltip
+                        button.pkAltData  = altData
+                        button.pkNodeName = nodeName
+
+                        -- Hook the tooltip (once per button)
+                        if not button.pkTooltipHooked then
+                            button.pkTooltipHooked = true
+                            button:HookScript("OnEnter", function(self)
+                                if not self.pkAltData then return end
+                                if not GameTooltip:IsShown() then return end
+
+                                GameTooltip:AddLine(" ")
+                                GameTooltip:AddLine("|cff00ccffAlt Knowledge:|r")
+                                for _, alt in ipairs(self.pkAltData) do
+                                    local cc = PK.ClassColors[alt.className] or "|cffffffff"
+                                    local name = alt.charKey:match("^(.-)%-") or alt.charKey
+                                    local rankColor
+                                    if alt.rank >= alt.maxRanks then
+                                        rankColor = "|cff00ff00"   -- green = maxed
+                                    elseif alt.rank > 0 then
+                                        rankColor = "|cffffd700"   -- gold  = partial
+                                    else
+                                        rankColor = "|cff555555"
+                                    end
+                                    GameTooltip:AddDoubleLine(
+                                        cc .. name .. "|r",
+                                        rankColor .. alt.rank .. "/" .. alt.maxRanks .. "|r",
+                                        1, 1, 1
+                                    )
+                                end
+                                GameTooltip:Show()
+                            end)
+                        end
+
+                    else
+                        -- No alt data — hide any previous highlight
+                        if button.pkHighlight then
+                            button.pkHighlight:Hide()
+                        end
+                        button.pkAltData = nil
+                    end
+                end
+            end
+        end
+    end
+end
+
+--- One-time hook installation on the spec page.
+function PK:SetupSpecTreeOverlay()
+    if specTreeHooked then return end
+
+    local specPage = ProfessionsFrame and ProfessionsFrame.SpecPage
+    if not specPage then
+        PK:Debug("Spec tree overlay: SpecPage not found")
+        return
+    end
+
+    specTreeHooked = true
+
+    -- When the Specializations tab is shown
+    specPage:HookScript("OnShow", function()
+        cachedProfBaseID = nil          -- force cache refresh
+        C_Timer.After(0.5, function()
+            PK:UpdateSpecTreeHighlights()
+        end)
+    end)
+
+    -- When a different spec tab is selected (SetTalentTreeID)
+    if specPage.SetTalentTreeID then
+        hooksecurefunc(specPage, "SetTalentTreeID", function()
+            cachedProfBaseID = nil
+            C_Timer.After(0.3, function()
+                PK:UpdateSpecTreeHighlights()
+            end)
+        end)
+    end
+
+    -- When tree currency / points update
+    if specPage.UpdateTreeCurrencyInfo then
+        hooksecurefunc(specPage, "UpdateTreeCurrencyInfo", function()
+            C_Timer.After(0.2, function()
+                PK:UpdateSpecTreeHighlights()
+            end)
+        end)
+    end
+
+    -- When individual buttons are refreshed
+    if specPage.UpdateButton then
+        hooksecurefunc(specPage, "UpdateButton", function()
+            C_Timer.After(0.2, function()
+                PK:UpdateSpecTreeHighlights()
+            end)
+        end)
+    end
+
+    PK:Debug("Spec tree overlay hooks installed")
+end
+
+----------------------------------------------------------------------
 -- Export Window — copyable text box with all character data
 ----------------------------------------------------------------------
 
