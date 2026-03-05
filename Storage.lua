@@ -124,9 +124,11 @@ function PK:GetAllCharactersForProfession(skillLineID, filterVariantID)
     for charKey, charData in pairs(self.db.characters) do
         if charData.professions and charData.professions[skillLineID] then
             local profData = charData.professions[skillLineID]
-            -- Filter by expansion variant when requested
+            -- Filter by expansion variant when requested.
+            -- If the stored data has no variantID (legacy / imported), treat as wildcard match.
             local variantMatch = (not filterVariantID)
-                or (profData.variantID and profData.variantID == filterVariantID)
+                or (not profData.variantID)
+                or (profData.variantID == filterVariantID)
                 or (profData.skillLineID and profData.skillLineID == filterVariantID)
             if variantMatch then
                 table.insert(results, {
@@ -151,21 +153,61 @@ function PK:GetAllCharactersForProfession(skillLineID, filterVariantID)
     return results
 end
 
---- Get all characters and all their professions (for summary window)
+--- Get all unique expansion names found across all character profession data.
+--- Returns a sorted list like { "Khaz Algar", "The War Within", ... }
+function PK:GetAvailableExpansions()
+    local seen = {}
+    local list = {}
+    if not self.db or not self.db.characters then return list end
+
+    for _, charData in pairs(self.db.characters) do
+        if charData.professions then
+            for _, profData in pairs(charData.professions) do
+                local exp = profData.expansionName
+                if exp and exp ~= "" and not seen[exp] then
+                    seen[exp] = true
+                    table.insert(list, exp)
+                end
+            end
+        end
+    end
+
+    table.sort(list)
+    return list
+end
+
+--- Get all characters and all their professions (for summary window).
+--- If filterExpansion is given, only professions matching that expansion are included.
 --- Returns: { { charKey, className, classID, level, professions = { [skillLineID] = profData, ... } }, ... }
-function PK:GetAllCharacters()
+function PK:GetAllCharacters(filterExpansion)
     local results = {}
     if not self.db or not self.db.characters then return results end
 
     for charKey, charData in pairs(self.db.characters) do
-        table.insert(results, {
-            charKey     = charKey,
-            className   = charData.className,
-            classID     = charData.classID,
-            level       = charData.level,
-            lastScanned = charData.lastScanned,
-            professions = charData.professions or {},
-        })
+        -- Filter professions by expansion if requested
+        local profs = charData.professions or {}
+        if filterExpansion then
+            local filtered = {}
+            for skillLineID, profData in pairs(profs) do
+                -- Include if expansion matches, or if no expansion info stored (wildcard)
+                if not profData.expansionName or profData.expansionName == filterExpansion then
+                    filtered[skillLineID] = profData
+                end
+            end
+            profs = filtered
+        end
+
+        -- Only include character if they have at least one matching profession
+        if not filterExpansion or next(profs) then
+            table.insert(results, {
+                charKey     = charKey,
+                className   = charData.className,
+                classID     = charData.classID,
+                level       = charData.level,
+                lastScanned = charData.lastScanned,
+                professions = profs,
+            })
+        end
     end
 
     -- Sort: current character first, then alphabetically

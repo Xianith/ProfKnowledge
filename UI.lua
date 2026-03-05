@@ -174,16 +174,60 @@ function PK:CreateSummaryWindow()
     local closeBtn = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
     closeBtn:SetPoint("TOPRIGHT", -4, -4)
 
-    -- Column headers area
+    -- Expansion filter dropdown
+    local dropdownLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    dropdownLabel:SetPoint("TOPLEFT", 20, -58)
+    dropdownLabel:SetTextColor(0.7, 0.7, 0.7)
+    dropdownLabel:SetText("Expansion:")
+    frame.dropdownLabel = dropdownLabel
+
+    local dropdown = CreateFrame("Frame", nil, frame, "UIDropDownMenuTemplate")
+    dropdown:SetPoint("LEFT", dropdownLabel, "RIGHT", -8, -2)
+    UIDropDownMenu_SetWidth(dropdown, 160)
+    frame.expansionDropdown = dropdown
+
+    -- Store the selected expansion (nil = "All")
+    frame.selectedExpansion = nil
+
+    UIDropDownMenu_Initialize(dropdown, function(self, level, menuList)
+        local info = UIDropDownMenu_CreateInfo()
+        -- "All Expansions" entry
+        info.text = "All Expansions"
+        info.func = function()
+            frame.selectedExpansion = nil
+            UIDropDownMenu_SetText(dropdown, "All Expansions")
+            PK:RefreshSummaryWindow()
+        end
+        info.checked = (frame.selectedExpansion == nil)
+        UIDropDownMenu_AddButton(info, level)
+
+        -- Dynamic expansion entries
+        local expansions = PK:GetAvailableExpansions()
+        for _, expName in ipairs(expansions) do
+            info = UIDropDownMenu_CreateInfo()
+            info.text = expName
+            info.func = function()
+                frame.selectedExpansion = expName
+                UIDropDownMenu_SetText(dropdown, expName)
+                PK:RefreshSummaryWindow()
+            end
+            info.checked = (frame.selectedExpansion == expName)
+            UIDropDownMenu_AddButton(info, level)
+        end
+    end)
+
+    UIDropDownMenu_SetText(dropdown, "All Expansions")
+
+    -- Column headers area (positioned below dropdown)
     local headerFrame = CreateFrame("Frame", nil, frame)
-    headerFrame:SetPoint("TOPLEFT", 16, -60)
-    headerFrame:SetPoint("TOPRIGHT", -16, -60)
+    headerFrame:SetPoint("TOPLEFT", 16, -84)
+    headerFrame:SetPoint("TOPRIGHT", -16, -84)
     headerFrame:SetHeight(24)
     frame.headerFrame = headerFrame
 
     -- Scroll frame for grid rows
     local scrollFrame = CreateFrame("ScrollFrame", nil, frame, "UIPanelScrollFrameTemplate")
-    scrollFrame:SetPoint("TOPLEFT", 16, -86)
+    scrollFrame:SetPoint("TOPLEFT", 16, -110)
     scrollFrame:SetPoint("BOTTOMRIGHT", -36, 16)
     frame.scrollFrame = scrollFrame
 
@@ -213,10 +257,15 @@ end
 function PK:RefreshSummaryWindow()
     if not summaryFrame then return end
 
-    local chars = self:GetAllCharacters()
+    local filterExpansion = summaryFrame.selectedExpansion
+    local chars = self:GetAllCharacters(filterExpansion)
     local charCount = #chars
 
-    summaryFrame.subtitle:SetText(charCount .. " character(s) tracked")
+    local subtitleText = charCount .. " character(s) tracked"
+    if filterExpansion then
+        subtitleText = subtitleText .. "  |cffffd700[" .. filterExpansion .. "]|r"
+    end
+    summaryFrame.subtitle:SetText(subtitleText)
 
     -- Determine which professions exist across all characters
     local activeProfessions = {}
@@ -997,9 +1046,11 @@ function PK:BuildAltNodeLookup(baseSkillLineID, filterVariantID)
     for charKey, charData in pairs(self.db.characters) do
         local profData = charData.professions and charData.professions[baseSkillLineID]
         if profData and profData.tabs then
-            -- Only include data from matching expansion variant (e.g. Midnight vs TWW)
+            -- Only include data from matching expansion variant (e.g. Midnight vs TWW).
+            -- If the stored data has no variantID (legacy / imported), treat as wildcard match.
             local variantMatch = (not filterVariantID)
-                or (profData.variantID and profData.variantID == filterVariantID)
+                or (not profData.variantID)
+                or (profData.variantID == filterVariantID)
                 or (profData.skillLineID and profData.skillLineID == filterVariantID)
             if not variantMatch then
                 PK:Debug("BuildAltNodeLookup: skipping " .. charKey

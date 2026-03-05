@@ -193,13 +193,23 @@ function PK:ScanAllProfessions()
     if self.db and self.db.characters and self.db.characters[self.charKey] then
         local existing = self.db.characters[self.charKey].professions or {}
         for baseID, newData in pairs(profData) do
-            if newData.hasSpec and (not newData.tabs or next(newData.tabs) == nil) then
-                local cached = existing[baseID]
-                if cached and cached.tabs and next(cached.tabs) ~= nil then
-                    PK:Debug("Preserving cached tree data for " .. (newData.name or "?"))
-                    newData.tabs = cached.tabs
-                    newData.totalKnowledgeSpent = cached.totalKnowledgeSpent or 0
-                    newData.unspentKnowledge = cached.unspentKnowledge or 0
+            local cached = existing[baseID]
+            if cached then
+                -- Preserve variant/expansion info from earlier scans if missing
+                if not newData.variantID and cached.variantID then
+                    newData.variantID = cached.variantID
+                end
+                if not newData.expansionName and cached.expansionName then
+                    newData.expansionName = cached.expansionName
+                end
+                -- Preserve tree data when the new scan came up empty
+                if newData.hasSpec and (not newData.tabs or next(newData.tabs) == nil) then
+                    if cached.tabs and next(cached.tabs) ~= nil then
+                        PK:Debug("Preserving cached tree data for " .. (newData.name or "?"))
+                        newData.tabs = cached.tabs
+                        newData.totalKnowledgeSpent = cached.totalKnowledgeSpent or 0
+                        newData.unspentKnowledge = cached.unspentKnowledge or 0
+                    end
                 end
             end
         end
@@ -258,7 +268,25 @@ function PK:ScanVariant(variantID, basicInfo)
         end
     end
 
-    PK:Debug("Scanning variant " .. variantID .. " (" .. profName .. ") parent=" .. tostring(parentID))
+    -- Determine expansion name from the variant profession name.
+    -- e.g., professionName = "Khaz Algar Alchemy" and parentProfessionName = "Alchemy"
+    -- expansion = "Khaz Algar"
+    local expansionName = nil
+    if profInfo then
+        local variantFullName = profInfo.professionName or ""
+        local baseName = profInfo.parentProfessionName or profName or ""
+        -- Strip the base name from the end of the variant name to get the expansion prefix
+        if baseName ~= "" and variantFullName ~= "" and variantFullName ~= baseName then
+            local pattern = "%s*" .. baseName:gsub("([%(%)%.%%%+%-%*%?%[%^%$])", "%%%1") .. "$"
+            local prefix = variantFullName:gsub(pattern, "")
+            if prefix ~= "" and prefix ~= variantFullName then
+                expansionName = strtrim(prefix)
+            end
+        end
+    end
+
+    PK:Debug("Scanning variant " .. variantID .. " (" .. profName .. ") parent=" .. tostring(parentID)
+        .. " expansion=" .. tostring(expansionName))
 
     -- Check if this variant has a specialization tree
     local hasSpec = false
@@ -273,6 +301,7 @@ function PK:ScanVariant(variantID, basicInfo)
             skillLineID         = variantID,
             baseSkillLineID     = baseID,
             variantID           = variantID,
+            expansionName       = expansionName,
             name                = profName,
             icon                = icon,
             skillLevel          = skillLevel,
@@ -297,6 +326,7 @@ function PK:ScanVariant(variantID, basicInfo)
             skillLineID         = variantID,
             baseSkillLineID     = baseID,
             variantID           = variantID,
+            expansionName       = expansionName,
             name                = profName,
             icon                = icon,
             skillLevel          = skillLevel,
@@ -355,6 +385,7 @@ function PK:ScanVariant(variantID, basicInfo)
         skillLineID         = variantID,
         baseSkillLineID     = baseID,
         variantID           = variantID,
+        expansionName       = expansionName,
         name                = profName,
         icon                = icon,
         skillLevel          = skillLevel,
