@@ -1,0 +1,22 @@
+# Claude Code
+.claude/
+.claude.md
+CLAUDE.md
+claude.md
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Editor / IDE
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# WoW SavedVariables (generated at runtime, not part of the addon)
+SavedVariables/
