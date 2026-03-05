@@ -98,6 +98,24 @@ PK.CraftingProfessions = {
 }
 
 ----------------------------------------------------------------------
+-- Expansion display names
+-- Maps the expansion prefix extracted from variant profession names
+-- (e.g. "Khaz Algar") to user-friendly expansion names.
+----------------------------------------------------------------------
+
+PK.ExpansionDisplayNames = {
+    ["Khaz Algar"] = "The War Within",
+    -- Midnight prefix will be auto-discovered; add mapping here if needed
+}
+
+--- Hardcoded list of expansions guaranteed to appear in the dropdown,
+--- even before any character data is scanned.
+PK.KnownExpansions = {
+    "Midnight",
+    "The War Within",
+}
+
+----------------------------------------------------------------------
 -- Display order for professions in the summary window
 ----------------------------------------------------------------------
 
@@ -114,6 +132,7 @@ PK.ProfessionOrder = {
     182,   -- Herbalism
     186,   -- Mining
     393,   -- Skinning
+    356,   -- Fishing
 }
 
 ----------------------------------------------------------------------

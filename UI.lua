@@ -174,51 +174,92 @@ function PK:CreateSummaryWindow()
     local closeBtn = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
     closeBtn:SetPoint("TOPRIGHT", -4, -4)
 
-    -- Expansion filter dropdown
-    local dropdownLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    dropdownLabel:SetPoint("TOPLEFT", 20, -58)
-    dropdownLabel:SetTextColor(0.7, 0.7, 0.7)
-    dropdownLabel:SetText("Expansion:")
-    frame.dropdownLabel = dropdownLabel
+    -- ── Filter row: Expansion + Profession dropdowns side-by-side ──
 
-    local dropdown = CreateFrame("Frame", nil, frame, "UIDropDownMenuTemplate")
-    dropdown:SetPoint("LEFT", dropdownLabel, "RIGHT", -8, -2)
-    UIDropDownMenu_SetWidth(dropdown, 160)
-    frame.expansionDropdown = dropdown
+    frame.selectedExpansion  = nil   -- nil = "All Expansions"
+    frame.selectedProfession = nil   -- nil = "All Professions"
 
-    -- Store the selected expansion (nil = "All")
-    frame.selectedExpansion = nil
+    -- Expansion label + dropdown
+    local expLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    expLabel:SetPoint("TOPLEFT", 20, -56)
+    expLabel:SetTextColor(0.7, 0.7, 0.7)
+    expLabel:SetText("Expansion:")
 
-    UIDropDownMenu_Initialize(dropdown, function(self, level, menuList)
+    local expDropdown = CreateFrame("Frame", nil, frame, "UIDropDownMenuTemplate")
+    expDropdown:SetPoint("LEFT", expLabel, "RIGHT", -8, -2)
+    UIDropDownMenu_SetWidth(expDropdown, 130)
+    frame.expansionDropdown = expDropdown
+
+    UIDropDownMenu_Initialize(expDropdown, function(self, level, menuList)
         local info = UIDropDownMenu_CreateInfo()
         -- "All Expansions" entry
         info.text = "All Expansions"
         info.func = function()
             frame.selectedExpansion = nil
-            UIDropDownMenu_SetText(dropdown, "All Expansions")
+            UIDropDownMenu_SetText(expDropdown, "All Expansions")
             PK:RefreshSummaryWindow()
         end
         info.checked = (frame.selectedExpansion == nil)
         UIDropDownMenu_AddButton(info, level)
 
-        -- Dynamic expansion entries
+        -- Dynamic + hardcoded expansion entries
         local expansions = PK:GetAvailableExpansions()
         for _, expName in ipairs(expansions) do
             info = UIDropDownMenu_CreateInfo()
             info.text = expName
             info.func = function()
                 frame.selectedExpansion = expName
-                UIDropDownMenu_SetText(dropdown, expName)
+                UIDropDownMenu_SetText(expDropdown, expName)
                 PK:RefreshSummaryWindow()
             end
             info.checked = (frame.selectedExpansion == expName)
             UIDropDownMenu_AddButton(info, level)
         end
     end)
+    UIDropDownMenu_SetText(expDropdown, "All Expansions")
 
-    UIDropDownMenu_SetText(dropdown, "All Expansions")
+    -- Profession label + dropdown
+    local profLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    profLabel:SetPoint("TOPLEFT", 340, -56)
+    profLabel:SetTextColor(0.7, 0.7, 0.7)
+    profLabel:SetText("Profession:")
 
-    -- Column headers area (positioned below dropdown)
+    local profDropdown = CreateFrame("Frame", nil, frame, "UIDropDownMenuTemplate")
+    profDropdown:SetPoint("LEFT", profLabel, "RIGHT", -8, -2)
+    UIDropDownMenu_SetWidth(profDropdown, 130)
+    frame.professionDropdown = profDropdown
+
+    UIDropDownMenu_Initialize(profDropdown, function(self, level, menuList)
+        local info = UIDropDownMenu_CreateInfo()
+        -- "All Professions" entry
+        info.text = "All Professions"
+        info.func = function()
+            frame.selectedProfession = nil
+            UIDropDownMenu_SetText(profDropdown, "All Professions")
+            PK:RefreshSummaryWindow()
+        end
+        info.checked = (frame.selectedProfession == nil)
+        UIDropDownMenu_AddButton(info, level)
+
+        -- List all 13 professions in display order
+        for _, skillLineID in ipairs(PK.ProfessionOrder) do
+            local profInfo = PK.ProfessionData[skillLineID]
+            if profInfo then
+                info = UIDropDownMenu_CreateInfo()
+                info.text = profInfo.name
+                info.func = function()
+                    frame.selectedProfession = skillLineID
+                    UIDropDownMenu_SetText(profDropdown, profInfo.name)
+                    PK:RefreshSummaryWindow()
+                end
+                info.checked = (frame.selectedProfession == skillLineID)
+                UIDropDownMenu_AddButton(info, level)
+            end
+        end
+    end)
+    UIDropDownMenu_SetText(profDropdown, "All Professions")
+
+    -- Column headers area (positioned below dropdowns)
     local headerFrame = CreateFrame("Frame", nil, frame)
     headerFrame:SetPoint("TOPLEFT", 16, -84)
     headerFrame:SetPoint("TOPRIGHT", -16, -84)
@@ -257,13 +298,19 @@ end
 function PK:RefreshSummaryWindow()
     if not summaryFrame then return end
 
-    local filterExpansion = summaryFrame.selectedExpansion
-    local chars = self:GetAllCharacters(filterExpansion)
+    local filterExpansion  = summaryFrame.selectedExpansion
+    local filterProfession = summaryFrame.selectedProfession
+    local chars = self:GetAllCharacters(filterExpansion, filterProfession)
     local charCount = #chars
 
-    local subtitleText = charCount .. " character(s) tracked"
+    local subtitleText = charCount .. " character(s)"
     if filterExpansion then
-        subtitleText = subtitleText .. "  |cffffd700[" .. filterExpansion .. "]|r"
+        subtitleText = subtitleText .. "  |cffffd700" .. filterExpansion .. "|r"
+    end
+    if filterProfession then
+        local profInfo = PK.ProfessionData[filterProfession]
+        local profName = profInfo and profInfo.name or "?"
+        subtitleText = subtitleText .. "  |cff00ccff" .. profName .. "|r"
     end
     summaryFrame.subtitle:SetText(subtitleText)
 

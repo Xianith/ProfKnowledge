@@ -270,7 +270,7 @@ function PK:ScanVariant(variantID, basicInfo)
 
     -- Determine expansion name from the variant profession name.
     -- e.g., professionName = "Khaz Algar Alchemy" and parentProfessionName = "Alchemy"
-    -- expansion = "Khaz Algar"
+    -- expansion prefix = "Khaz Algar" → display name "The War Within"
     local expansionName = nil
     if profInfo then
         local variantFullName = profInfo.professionName or ""
@@ -280,7 +280,9 @@ function PK:ScanVariant(variantID, basicInfo)
             local pattern = "%s*" .. baseName:gsub("([%(%)%.%%%+%-%*%?%[%^%$])", "%%%1") .. "$"
             local prefix = variantFullName:gsub(pattern, "")
             if prefix ~= "" and prefix ~= variantFullName then
-                expansionName = strtrim(prefix)
+                prefix = strtrim(prefix)
+                -- Map raw prefix (e.g. "Khaz Algar") → display name ("The War Within")
+                expansionName = PK.ExpansionDisplayNames[prefix] or prefix
             end
         end
     end

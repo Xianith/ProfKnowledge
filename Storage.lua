@@ -153,20 +153,33 @@ function PK:GetAllCharactersForProfession(skillLineID, filterVariantID)
     return results
 end
 
---- Get all unique expansion names found across all character profession data.
---- Returns a sorted list like { "Khaz Algar", "The War Within", ... }
+--- Get all expansion names for the dropdown.
+--- Merges the hardcoded PK.KnownExpansions with any discovered from scans.
+--- Returns a sorted list like { "Midnight", "The War Within", ... }
 function PK:GetAvailableExpansions()
     local seen = {}
     local list = {}
-    if not self.db or not self.db.characters then return list end
 
-    for _, charData in pairs(self.db.characters) do
-        if charData.professions then
-            for _, profData in pairs(charData.professions) do
-                local exp = profData.expansionName
-                if exp and exp ~= "" and not seen[exp] then
-                    seen[exp] = true
-                    table.insert(list, exp)
+    -- Start with hardcoded known expansions
+    if PK.KnownExpansions then
+        for _, expName in ipairs(PK.KnownExpansions) do
+            if not seen[expName] then
+                seen[expName] = true
+                table.insert(list, expName)
+            end
+        end
+    end
+
+    -- Merge in any expansions discovered from character data
+    if self.db and self.db.characters then
+        for _, charData in pairs(self.db.characters) do
+            if charData.professions then
+                for _, profData in pairs(charData.professions) do
+                    local exp = profData.expansionName
+                    if exp and exp ~= "" and not seen[exp] then
+                        seen[exp] = true
+                        table.insert(list, exp)
+                    end
                 end
             end
         end
@@ -176,21 +189,35 @@ function PK:GetAvailableExpansions()
     return list
 end
 
---- Get all characters and all their professions (for summary window).
---- If filterExpansion is given, only professions matching that expansion are included.
+--- Get all characters and their professions (for summary window).
+--- filterExpansion: if given, only professions matching that expansion are included.
+--- filterProfession: if given (a skillLineID), only that profession is included.
 --- Returns: { { charKey, className, classID, level, professions = { [skillLineID] = profData, ... } }, ... }
-function PK:GetAllCharacters(filterExpansion)
+function PK:GetAllCharacters(filterExpansion, filterProfession)
     local results = {}
     if not self.db or not self.db.characters then return results end
 
+    local hasFilter = filterExpansion or filterProfession
+
     for charKey, charData in pairs(self.db.characters) do
-        -- Filter professions by expansion if requested
         local profs = charData.professions or {}
-        if filterExpansion then
+
+        if hasFilter then
             local filtered = {}
             for skillLineID, profData in pairs(profs) do
-                -- Include if expansion matches, or if no expansion info stored (wildcard)
-                if not profData.expansionName or profData.expansionName == filterExpansion then
+                local keep = true
+                -- Expansion filter
+                if filterExpansion then
+                    if profData.expansionName and profData.expansionName ~= filterExpansion then
+                        keep = false
+                    end
+                    -- Data without an expansion name passes through (wildcard)
+                end
+                -- Profession filter
+                if filterProfession and skillLineID ~= filterProfession then
+                    keep = false
+                end
+                if keep then
                     filtered[skillLineID] = profData
                 end
             end
@@ -198,7 +225,7 @@ function PK:GetAllCharacters(filterExpansion)
         end
 
         -- Only include character if they have at least one matching profession
-        if not filterExpansion or next(profs) then
+        if not hasFilter or next(profs) then
             table.insert(results, {
                 charKey     = charKey,
                 className   = charData.className,
