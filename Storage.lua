@@ -206,10 +206,11 @@ function PK:GetAllCharacters(filterExpansion, filterProfession)
             local filtered = {}
             for skillLineID, profData in pairs(profs) do
                 local keep = true
-                -- Expansion filter: require a matching expansion name.
-                -- Data without an expansion name is excluded when filtering.
+                -- Expansion filter: exclude professions explicitly from a DIFFERENT expansion.
+                -- Professions without a known expansionName pass through (legacy data
+                -- needs a rescan via /pk scan to populate the expansion field).
                 if filterExpansion then
-                    if not profData.expansionName or profData.expansionName ~= filterExpansion then
+                    if profData.expansionName and profData.expansionName ~= filterExpansion then
                         keep = false
                     end
                 end
