@@ -140,6 +140,17 @@ function PK:ScanAllProfessions()
         end
     end
 
+    -- Track which base skillLineIDs are in the main profession slots
+    local prof1BaseID, prof2BaseID = nil, nil
+    if prof1 then
+        local _, _, _, _, _, _, sid = GetProfessionInfo(prof1)
+        prof1BaseID = sid
+    end
+    if prof2 then
+        local _, _, _, _, _, _, sid = GetProfessionInfo(prof2)
+        prof2BaseID = sid
+    end
+
     -- Now discover variant IDs and scan spec trees
     local profData = {}
     local scannedBaseIDs = {}
@@ -216,12 +227,13 @@ function PK:ScanAllProfessions()
         end
     end
 
-    -- Save
-    self:SaveCharacterData(profData)
+    -- Save (include prof slot assignments)
+    self:SaveCharacterData(profData, prof1BaseID, prof2BaseID)
 
     local count = 0
     for _ in pairs(profData) do count = count + 1 end
-    PK:Debug("Scanned " .. count .. " profession(s) for " .. self.charKey)
+    PK:Debug("Scanned " .. count .. " profession(s) for " .. self.charKey
+        .. " (prof1=" .. tostring(prof1BaseID) .. " prof2=" .. tostring(prof2BaseID) .. ")")
 end
 
 function PK:IsBetterScan(newScan, oldScan)

@@ -174,53 +174,13 @@ function PK:CreateSummaryWindow()
     local closeBtn = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
     closeBtn:SetPoint("TOPRIGHT", -4, -4)
 
-    -- ── Filter row: Expansion + Profession dropdowns side-by-side ──
+    -- ── Filter row: Profession dropdown ──
 
-    frame.selectedExpansion  = nil   -- nil = "All Expansions"
     frame.selectedProfession = nil   -- nil = "All Professions"
-
-    -- Expansion label + dropdown
-    local expLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    expLabel:SetPoint("TOPLEFT", 20, -56)
-    expLabel:SetTextColor(0.7, 0.7, 0.7)
-    expLabel:SetText("Expansion:")
-
-    local expDropdown = CreateFrame("Frame", nil, frame, "UIDropDownMenuTemplate")
-    expDropdown:SetPoint("LEFT", expLabel, "RIGHT", -8, -2)
-    UIDropDownMenu_SetWidth(expDropdown, 130)
-    frame.expansionDropdown = expDropdown
-
-    UIDropDownMenu_Initialize(expDropdown, function(self, level, menuList)
-        local info = UIDropDownMenu_CreateInfo()
-        -- "All Expansions" entry
-        info.text = "All Expansions"
-        info.func = function()
-            frame.selectedExpansion = nil
-            UIDropDownMenu_SetText(expDropdown, "All Expansions")
-            PK:RefreshSummaryWindow()
-        end
-        info.checked = (frame.selectedExpansion == nil)
-        UIDropDownMenu_AddButton(info, level)
-
-        -- Dynamic + hardcoded expansion entries
-        local expansions = PK:GetAvailableExpansions()
-        for _, expName in ipairs(expansions) do
-            info = UIDropDownMenu_CreateInfo()
-            info.text = expName
-            info.func = function()
-                frame.selectedExpansion = expName
-                UIDropDownMenu_SetText(expDropdown, expName)
-                PK:RefreshSummaryWindow()
-            end
-            info.checked = (frame.selectedExpansion == expName)
-            UIDropDownMenu_AddButton(info, level)
-        end
-    end)
-    UIDropDownMenu_SetText(expDropdown, "All Expansions")
 
     -- Profession label + dropdown
     local profLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    profLabel:SetPoint("TOPLEFT", 340, -56)
+    profLabel:SetPoint("TOPLEFT", 20, -56)
     profLabel:SetTextColor(0.7, 0.7, 0.7)
     profLabel:SetText("Profession:")
 
@@ -374,13 +334,12 @@ end
 function PK:RefreshSummaryWindow()
     if not summaryFrame then return end
 
-    local filterExpansion  = summaryFrame.selectedExpansion
     local filterProfession = summaryFrame.selectedProfession
 
-    -- Get characters with expansion filter applied to profession data.
-    -- Profession filter is handled separately as a character-level filter:
-    -- we show ALL professions for characters that HAVE the selected profession.
-    local chars = self:GetAllCharacters(filterExpansion, nil)
+    -- Get characters with Midnight expansion filter (hardcoded).
+    -- This excludes professions with a known non-Midnight expansion name.
+    -- Professions with nil expansionName pass through (need rescan).
+    local chars = self:GetAllCharacters("Midnight", nil)
 
     -- Apply profession filter: only show characters that have the selected profession
     if filterProfession then
@@ -395,10 +354,7 @@ function PK:RefreshSummaryWindow()
 
     local charCount = #chars
 
-    local subtitleText = charCount .. " character(s)"
-    if filterExpansion then
-        subtitleText = subtitleText .. "  |cffffd700" .. filterExpansion .. "|r"
-    end
+    local subtitleText = charCount .. " character(s)  |cffffd700Midnight|r"
     if filterProfession then
         local profInfo = PK.ProfessionData[filterProfession]
         local profName = profInfo and profInfo.name or "?"
@@ -406,42 +362,26 @@ function PK:RefreshSummaryWindow()
     end
     summaryFrame.subtitle:SetText(subtitleText)
 
-    -- Sort professions by display order
+    -- Sort professions by display order (for fallback prof slot ordering)
     local orderMap = {}
     for i, id in ipairs(PK.ProfessionOrder) do
         orderMap[id] = i
     end
 
-    -- Dynamic column layout:
-    -- One column per main profession that ANY character has data for,
-    -- plus fixed columns for Cooking, Fishing, Archaeology.
-    -- This ensures characters who switched professions show ALL stored data.
+    -- Fixed 4-column layout:
+    -- Col 1: Prof 1 (first main profession slot)
+    -- Col 2: Prof 2 (second main profession slot)
+    -- Col 3: Cooking (185)
+    -- Col 4: Fishing (356)
     local NAME_COL_WIDTH   = 130
-    local MAIN_COL_WIDTH   = 70    -- each main prof gets a named column
+    local MAIN_COL_WIDTH   = 110   -- wider to fit "Ench 40/45"
     local SEC_COL_WIDTH    = 70
     local ROW_HEIGHT       = 22
 
     local COOKING_ID       = 185
     local FISHING_ID       = 356
-    local ARCHAEOLOGY_ID   = 794
 
-    -- First pass: determine which main professions exist across ALL characters
-    local mainProfSet = {}
-    local mainProfCols = {}  -- ordered list of skillLineIDs for column headers
-    for _, char in ipairs(chars) do
-        for skillLineID in pairs(char.professions) do
-            if not PK.SecondaryProfessions[skillLineID] and not mainProfSet[skillLineID] then
-                mainProfSet[skillLineID] = true
-                table.insert(mainProfCols, skillLineID)
-            end
-        end
-    end
-    -- Sort columns by profession display order
-    table.sort(mainProfCols, function(a, b)
-        return (orderMap[a] or 999) < (orderMap[b] or 999)
-    end)
-
-    local totalWidth = NAME_COL_WIDTH + (#mainProfCols * MAIN_COL_WIDTH) + (3 * SEC_COL_WIDTH)
+    local totalWidth = NAME_COL_WIDTH + (2 * MAIN_COL_WIDTH) + (2 * SEC_COL_WIDTH)
     summaryFrame:SetWidth(math.max(520, totalWidth + 70))
 
     -- Clear old content
@@ -464,17 +404,14 @@ function PK:RefreshSummaryWindow()
     end
     scrollChild.children = {}
 
-    -- Column headers — dynamic main prof columns + fixed secondary columns
+    -- Column headers — fixed 4-column layout
     local headers = {
         { text = "Character", width = NAME_COL_WIDTH, justify = "LEFT" },
+        { text = "Prof 1",    width = MAIN_COL_WIDTH, justify = "CENTER" },
+        { text = "Prof 2",    width = MAIN_COL_WIDTH, justify = "CENTER" },
+        { text = "Cook",      width = SEC_COL_WIDTH,  justify = "CENTER" },
+        { text = "Fish",      width = SEC_COL_WIDTH,  justify = "CENTER" },
     }
-    for _, skillLineID in ipairs(mainProfCols) do
-        local shortName = PK.ProfessionShortNames[skillLineID] or "?"
-        table.insert(headers, { text = shortName, width = MAIN_COL_WIDTH, justify = "CENTER" })
-    end
-    table.insert(headers, { text = "Cook", width = SEC_COL_WIDTH, justify = "CENTER" })
-    table.insert(headers, { text = "Fish", width = SEC_COL_WIDTH, justify = "CENTER" })
-    table.insert(headers, { text = "Arch", width = SEC_COL_WIDTH, justify = "CENTER" })
 
     local xCursor = 4
     for _, hdr in ipairs(headers) do
@@ -525,33 +462,56 @@ function PK:RefreshSummaryWindow()
         nameText:SetText(nameStr)
         table.insert(scrollChild.children, nameText)
 
-        -- Dynamic main profession columns
-        local xPos = 4 + NAME_COL_WIDTH
+        -- Determine Prof 1 and Prof 2 using stored slot assignments
+        local prof1ID = char.prof1BaseID
+        local prof2ID = char.prof2BaseID
 
-        for _, skillLineID in ipairs(mainProfCols) do
-            local profData = char.professions[skillLineID]
-            local cellText = profData
-                and FormatProfCell(profData, false)
-                or "|cff333333—|r"
-            CreateGridCell(scrollChild, xPos, yOffset, MAIN_COL_WIDTH, ROW_HEIGHT,
-                cellText, char.charKey, skillLineID, profData)
-            xPos = xPos + MAIN_COL_WIDTH
+        -- Fallback for characters scanned before slot tracking was added:
+        -- extract main professions and sort by display order
+        if not prof1ID and not prof2ID then
+            local mainProfs = {}
+            for skillLineID in pairs(char.professions) do
+                if not PK.SecondaryProfessions[skillLineID] then
+                    table.insert(mainProfs, skillLineID)
+                end
+            end
+            table.sort(mainProfs, function(a, b)
+                return (orderMap[a] or 999) < (orderMap[b] or 999)
+            end)
+            prof1ID = mainProfs[1]
+            prof2ID = mainProfs[2]
         end
 
-        -- Fixed secondary profession columns: Cooking, Fishing, Archaeology
+        local xPos = 4 + NAME_COL_WIDTH
+
+        -- Prof 1
+        local prof1Data = prof1ID and char.professions[prof1ID] or nil
+        local prof1Text = prof1Data
+            and FormatProfCell(prof1Data, true)
+            or "|cff333333—|r"
+        CreateGridCell(scrollChild, xPos, yOffset, MAIN_COL_WIDTH, ROW_HEIGHT,
+            prof1Text, char.charKey, prof1ID or 0, prof1Data)
+        xPos = xPos + MAIN_COL_WIDTH
+
+        -- Prof 2
+        local prof2Data = prof2ID and char.professions[prof2ID] or nil
+        local prof2Text = prof2Data
+            and FormatProfCell(prof2Data, true)
+            or "|cff333333—|r"
+        CreateGridCell(scrollChild, xPos, yOffset, MAIN_COL_WIDTH, ROW_HEIGHT,
+            prof2Text, char.charKey, prof2ID or 0, prof2Data)
+        xPos = xPos + MAIN_COL_WIDTH
+
+        -- Cooking
         local cookData = char.professions[COOKING_ID]
         CreateGridCell(scrollChild, xPos, yOffset, SEC_COL_WIDTH, ROW_HEIGHT,
             FormatProfCell(cookData, false), char.charKey, COOKING_ID, cookData)
         xPos = xPos + SEC_COL_WIDTH
 
+        -- Fishing
         local fishData = char.professions[FISHING_ID]
         CreateGridCell(scrollChild, xPos, yOffset, SEC_COL_WIDTH, ROW_HEIGHT,
             FormatProfCell(fishData, false), char.charKey, FISHING_ID, fishData)
-        xPos = xPos + SEC_COL_WIDTH
-
-        local archData = char.professions[ARCHAEOLOGY_ID]
-        CreateGridCell(scrollChild, xPos, yOffset, SEC_COL_WIDTH, ROW_HEIGHT,
-            FormatProfCell(archData, false), char.charKey, ARCHAEOLOGY_ID, archData)
 
         yOffset = yOffset - ROW_HEIGHT
     end

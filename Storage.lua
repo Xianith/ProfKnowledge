@@ -86,7 +86,7 @@ end
 -- Character data operations
 ----------------------------------------------------------------------
 
-function PK:SaveCharacterData(profData)
+function PK:SaveCharacterData(profData, prof1BaseID, prof2BaseID)
     if not self.db or not self.charKey then return end
 
     self.db.characters[self.charKey] = {
@@ -94,6 +94,8 @@ function PK:SaveCharacterData(profData)
         classID     = self.playerClassID,
         level       = self.playerLevel,
         lastScanned = time(),
+        prof1BaseID = prof1BaseID,
+        prof2BaseID = prof2BaseID,
         professions = profData,
     }
 
@@ -233,6 +235,8 @@ function PK:GetAllCharacters(filterExpansion, filterProfession)
                 classID     = charData.classID,
                 level       = charData.level,
                 lastScanned = charData.lastScanned,
+                prof1BaseID = charData.prof1BaseID,
+                prof2BaseID = charData.prof2BaseID,
                 professions = profs,
             })
         end
