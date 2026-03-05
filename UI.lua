@@ -229,7 +229,7 @@ function PK:CreateSummaryWindow()
     -- Scroll frame for grid rows
     local scrollFrame = CreateFrame("ScrollFrame", nil, frame, "UIPanelScrollFrameTemplate")
     scrollFrame:SetPoint("TOPLEFT", 16, -110)
-    scrollFrame:SetPoint("BOTTOMRIGHT", -36, 16)
+    scrollFrame:SetPoint("BOTTOMRIGHT", -36, 42)
     frame.scrollFrame = scrollFrame
 
     local scrollChild = CreateFrame("Frame", nil, scrollFrame)
@@ -245,6 +245,23 @@ function PK:CreateSummaryWindow()
         else
             self:SetPropagateKeyboardInput(true)
         end
+    end)
+
+    -- Bottom button bar: Import / Export
+    local exportBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    exportBtn:SetSize(80, 22)
+    exportBtn:SetPoint("BOTTOMRIGHT", -16, 12)
+    exportBtn:SetText("Export")
+    exportBtn:SetScript("OnClick", function()
+        PK:ShowExportWindow()
+    end)
+
+    local importBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    importBtn:SetSize(80, 22)
+    importBtn:SetPoint("RIGHT", exportBtn, "LEFT", -6, 0)
+    importBtn:SetText("Import")
+    importBtn:SetScript("OnClick", function()
+        PK:ShowImportWindow()
     end)
 
     frame:Hide()
@@ -1397,6 +1414,49 @@ function PK:SetupSpecTreeOverlay()
     end
 
     PK:Debug("Spec tree overlay hooks installed")
+end
+
+----------------------------------------------------------------------
+-- Button on Blizzard Profession Frame
+----------------------------------------------------------------------
+
+function PK:CreateProfessionButton()
+    local profFrame = ProfessionsFrame
+    if not profFrame then return end
+
+    local btn = CreateFrame("Button", nil, profFrame, "UIPanelButtonTemplate")
+    btn:SetSize(90, 22)
+    btn:SetText("|cff00ccffPK|r")
+    btn:SetPoint("TOPRIGHT", profFrame, "TOPRIGHT", -60, -2)
+    btn:SetFrameStrata("HIGH")
+
+    btn:SetScript("OnClick", function()
+        PK:ShowSummaryWindowAnchored(profFrame)
+    end)
+
+    btn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+        GameTooltip:AddLine("|cff00ccffProfKnowledge|r")
+        GameTooltip:AddLine("View profession knowledge across all characters", 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    btn:SetScript("OnLeave", function()
+        GameTooltip:Hide()
+    end)
+
+    PK:Debug("PK button added to profession frame")
+end
+
+function PK:ShowSummaryWindowAnchored(anchorFrame)
+    if not summaryFrame then
+        summaryFrame = self:CreateSummaryWindow()
+    end
+    self:RefreshSummaryWindow()
+
+    -- Anchor to the right of the profession frame
+    summaryFrame:ClearAllPoints()
+    summaryFrame:SetPoint("TOPLEFT", anchorFrame, "TOPRIGHT", 4, 0)
+    summaryFrame:Show()
 end
 
 ----------------------------------------------------------------------

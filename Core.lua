@@ -559,6 +559,10 @@ local function SetupProfessionUI()
     if PK.SetupSpecTreeOverlay then
         PK:SetupSpecTreeOverlay()
     end
+
+    if PK.CreateProfessionButton then
+        PK:CreateProfessionButton()
+    end
 end
 
 ----------------------------------------------------------------------
