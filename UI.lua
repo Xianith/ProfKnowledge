@@ -720,11 +720,15 @@ function PK:InitOverlay()
     local profFrame = ProfessionsFrame
     if not profFrame then return end
 
-    -- Create the overlay panel
-    overlayFrame = CreateFrame("Frame", nil, profFrame, "BackdropTemplate")
-    overlayFrame:SetSize(320, 200)
-    overlayFrame:SetFrameStrata("DIALOG")
+    local specPage = profFrame.SpecPage
+    if not specPage then return end
 
+    -- Parent to SpecPage so the overlay auto-hides when switching tabs
+    overlayFrame = CreateFrame("Frame", nil, specPage, "BackdropTemplate")
+    overlayFrame:SetSize(280, 200)
+    overlayFrame:SetFrameStrata("HIGH")
+
+    -- Profession-UI-matching dark panel with gold-tinted border
     overlayFrame:SetBackdrop({
         bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
         edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
@@ -733,26 +737,42 @@ function PK:InitOverlay()
         edgeSize = 16,
         insets   = { left = 4, right = 4, top = 4, bottom = 4 },
     })
+    overlayFrame:SetBackdropColor(0.08, 0.08, 0.08, 0.92)
+    overlayFrame:SetBackdropBorderColor(0.6, 0.5, 0.15, 0.9)
 
-    -- Position: top-right of the profession frame
-    overlayFrame:SetPoint("TOPRIGHT", profFrame, "TOPRIGHT", -20, -60)
+    -- Position: sidebar anchored to the right edge of the SpecPage
+    overlayFrame:SetPoint("TOPLEFT", specPage, "TOPRIGHT", 3, -2)
 
-    -- Make it draggable within the profession frame
+    -- Make it draggable
     overlayFrame:SetMovable(true)
     overlayFrame:EnableMouse(true)
     overlayFrame:RegisterForDrag("LeftButton")
     overlayFrame:SetScript("OnDragStart", overlayFrame.StartMoving)
     overlayFrame:SetScript("OnDragStop", overlayFrame.StopMovingOrSizing)
 
-    -- Title
+    -- Header background strip (dark inset look)
+    local headerBg = overlayFrame:CreateTexture(nil, "ARTWORK")
+    headerBg:SetPoint("TOPLEFT", 5, -5)
+    headerBg:SetPoint("TOPRIGHT", -5, -5)
+    headerBg:SetHeight(20)
+    headerBg:SetColorTexture(0, 0, 0, 0.4)
+
+    -- Title text (profession-panel style)
     local title = overlayFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    title:SetPoint("TOP", 0, -8)
+    title:SetPoint("TOP", 0, -7)
     title:SetText("|cff00ccffAlt Knowledge|r")
     overlayFrame.title = title
 
+    -- Gold divider line under header
+    local divider = overlayFrame:CreateTexture(nil, "ARTWORK")
+    divider:SetPoint("TOPLEFT", 6, -27)
+    divider:SetPoint("TOPRIGHT", -6, -27)
+    divider:SetHeight(1)
+    divider:SetColorTexture(0.6, 0.5, 0.2, 0.5)
+
     -- Scroll area for content (in case of many alts)
     local scrollFrame = CreateFrame("ScrollFrame", nil, overlayFrame, "UIPanelScrollFrameTemplate")
-    scrollFrame:SetPoint("TOPLEFT", 8, -28)
+    scrollFrame:SetPoint("TOPLEFT", 8, -30)
     scrollFrame:SetPoint("BOTTOMRIGHT", -28, 8)
     overlayFrame.scrollFrame = scrollFrame
 
@@ -762,29 +782,14 @@ function PK:InitOverlay()
     overlayFrame.scrollChild = scrollChild
     overlayFrame.contentChildren = {}
 
-    -- Hook the profession frame show/hide
-    profFrame:HookScript("OnShow", function()
+    -- Hook SpecPage show to refresh overlay content
+    specPage:HookScript("OnShow", function()
         C_Timer.After(0.5, function()
             PK:RefreshOverlay()
         end)
     end)
 
-    profFrame:HookScript("OnHide", function()
-        if overlayFrame then
-            overlayFrame:Hide()
-        end
-    end)
-
-    -- Hook tab changes
-    if profFrame.TabSystem then
-        hooksecurefunc(profFrame.TabSystem, "SetTab", function()
-            C_Timer.After(0.3, function()
-                PK:RefreshOverlay()
-            end)
-        end)
-    end
-
-    PK:Debug("Overlay created and hooked")
+    PK:Debug("Overlay created and hooked to SpecPage")
 end
 
 function PK:RefreshOverlay()
@@ -799,9 +804,10 @@ function PK:RefreshOverlay()
     end
     overlayFrame.contentChildren = {}
 
-    -- Get the currently viewed profession
+    -- Only show on the Specializations tab
     local profFrame = ProfessionsFrame
-    if not profFrame or not profFrame:IsShown() then
+    local specPage = profFrame and profFrame.SpecPage
+    if not profFrame or not profFrame:IsShown() or not specPage or not specPage:IsShown() then
         overlayFrame:Hide()
         return
     end
@@ -1127,7 +1133,7 @@ function PK:UpdateSpecTreeHighlights()
                         if not button.pkHighlight then
                             local glow = button:CreateTexture(nil, "OVERLAY", nil, 7)
                             glow:SetPoint("CENTER", 0, 0)
-                            local size = math.min(button:GetWidth(), button:GetHeight()) + 6
+                            local size = (math.min(button:GetWidth(), button:GetHeight()) + 6) * 0.95
                             glow:SetSize(size, size)
                             glow:SetTexture("Interface\\CHARACTERFRAME\\TempPortraitAlphaMask")
                             glow:SetVertexColor(0, 1, 0, 0.35)
