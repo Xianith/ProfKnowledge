@@ -861,8 +861,6 @@ end
 local overlayFrame = nil
 
 function PK:InitOverlay()
-    -- Disabled for now; will revisit later
-    do return end
     if overlayFrame then return end
 
     local profFrame = ProfessionsFrame
@@ -941,8 +939,6 @@ function PK:InitOverlay()
 end
 
 function PK:RefreshOverlay()
-    -- Disabled for now; will revisit later
-    do return end
     if not overlayFrame then return end
 
     local scrollChild = overlayFrame.scrollChild
@@ -1314,10 +1310,10 @@ function PK:UpdateSpecTreeHighlights()
                         if not button.pkHighlight then
                             local glow = button:CreateTexture(nil, "OVERLAY", nil, 7)
                             glow:SetPoint("CENTER", 0, 0)
-                            local size = (math.min(button:GetWidth(), button:GetHeight()) + 6) * 0.85
+                            local size = math.min(button:GetWidth(), button:GetHeight())
                             glow:SetSize(size, size)
                             glow:SetTexture("Interface\\CHARACTERFRAME\\TempPortraitAlphaMask")
-                            glow:SetVertexColor(0, 1, 0, 0.35)
+                            glow:SetVertexColor(0, 1, 0, 0.3)
                             glow:SetBlendMode("ADD")
                             button.pkHighlight = glow
                         end
