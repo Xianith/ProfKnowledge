@@ -132,7 +132,7 @@ end
 
 function PK:CreateSummaryWindow()
     local frame = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
-    frame:SetSize(750, 450)
+    frame:SetSize(660, 450)
     frame:SetPoint("CENTER")
     frame:SetMovable(true)
     frame:EnableMouse(true)
@@ -295,12 +295,104 @@ end
 -- Refresh the summary grid
 ----------------------------------------------------------------------
 
+----------------------------------------------------------------------
+-- Helper: format a profession cell's knowledge text
+----------------------------------------------------------------------
+local function FormatProfCell(profData, showShortName)
+    if not profData then
+        return "|cff333333—|r"
+    end
+
+    local prefix = ""
+    if showShortName then
+        local shortName = PK.ProfessionShortNames[profData.baseSkillLineID or 0]
+            or PK.ProfessionShortNames[profData.skillLineID or 0]
+        if not shortName then
+            -- Try to derive short name from the full name
+            local name = profData.name or ""
+            shortName = name:sub(1, 4)
+        end
+        if shortName and shortName ~= "" then
+            prefix = "|cffaaaaaa" .. shortName .. "|r "
+        end
+    end
+
+    if profData.hasSpec == false then
+        return prefix .. "|cff888888" .. (profData.skillLevel or 0) .. "|r"
+    end
+
+    local spent = profData.totalKnowledgeSpent or 0
+    local unspent = profData.unspentKnowledge or 0
+
+    if unspent > 0 then
+        return prefix .. string.format("|cff00ff00%d|r/|cffffd700%d|r", spent, spent + unspent)
+    elseif spent > 0 then
+        return prefix .. "|cffffffff" .. spent .. "|r"
+    else
+        return prefix .. "|cff5555550|r"
+    end
+end
+
+----------------------------------------------------------------------
+-- Helper: create a clickable cell button in the grid
+----------------------------------------------------------------------
+local function CreateGridCell(parent, xPos, yOffset, width, height, cellTextStr, charKey, skillLineID, profData)
+    local cellBtn = CreateFrame("Button", nil, parent)
+    cellBtn:SetPoint("TOPLEFT", xPos, yOffset)
+    cellBtn:SetSize(width, height)
+    table.insert(parent.children, cellBtn)
+
+    local cellText = cellBtn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    cellText:SetAllPoints()
+    cellText:SetJustifyH("CENTER")
+    cellText:SetJustifyV("MIDDLE")
+    cellText:SetText(cellTextStr)
+
+    if profData then
+        -- Highlight on hover
+        local highlight = cellBtn:CreateTexture(nil, "HIGHLIGHT")
+        highlight:SetAllPoints()
+        highlight:SetColorTexture(1, 1, 1, 0.1)
+
+        -- Click to show detail
+        cellBtn:SetScript("OnClick", function()
+            PK:ShowDetailPanel(charKey, skillLineID)
+        end)
+
+        -- Tooltip on hover showing tab summary
+        cellBtn:SetScript("OnEnter", function(btn)
+            PK:ShowCellTooltip(btn, charKey, skillLineID, profData)
+        end)
+        cellBtn:SetScript("OnLeave", function()
+            GameTooltip:Hide()
+        end)
+    end
+
+    return cellBtn
+end
+
 function PK:RefreshSummaryWindow()
     if not summaryFrame then return end
 
     local filterExpansion  = summaryFrame.selectedExpansion
     local filterProfession = summaryFrame.selectedProfession
-    local chars = self:GetAllCharacters(filterExpansion, filterProfession)
+
+    -- Get characters with expansion filter applied to profession data.
+    -- Profession filter is handled separately as a character-level filter:
+    -- we show ALL professions for characters that HAVE the selected profession.
+    local chars = self:GetAllCharacters(filterExpansion, nil)
+
+    -- Apply profession filter: only show characters that have the selected profession
+    if filterProfession then
+        local filtered = {}
+        for _, char in ipairs(chars) do
+            if char.professions[filterProfession] then
+                table.insert(filtered, char)
+            end
+        end
+        chars = filtered
+    end
+
     local charCount = #chars
 
     local subtitleText = charCount .. " character(s)"
@@ -314,35 +406,29 @@ function PK:RefreshSummaryWindow()
     end
     summaryFrame.subtitle:SetText(subtitleText)
 
-    -- Determine which professions exist across all characters
-    local activeProfessions = {}
-    local profSet = {}
-    for _, char in ipairs(chars) do
-        for skillLineID, _ in pairs(char.professions) do
-            if not profSet[skillLineID] then
-                profSet[skillLineID] = true
-                table.insert(activeProfessions, skillLineID)
-            end
-        end
-    end
-
-    -- Sort professions by display order
+    -- Sort professions by display order (for determining main prof order)
     local orderMap = {}
     for i, id in ipairs(PK.ProfessionOrder) do
         orderMap[id] = i
     end
-    table.sort(activeProfessions, function(a, b)
-        return (orderMap[a] or 999) < (orderMap[b] or 999)
-    end)
 
-    -- Layout constants
-    local NAME_COL_WIDTH = 140
-    local PROF_COL_WIDTH = 72
-    local ROW_HEIGHT = 22
-    local totalWidth = NAME_COL_WIDTH + (#activeProfessions * PROF_COL_WIDTH)
+    -- Fixed 5-column layout:
+    -- Col 1: Main Prof 1 (varies per character)
+    -- Col 2: Main Prof 2 (varies per character)
+    -- Col 3: Cooking (185)
+    -- Col 4: Fishing (356)
+    -- Col 5: Archaeology (794)
+    local NAME_COL_WIDTH   = 130
+    local MAIN_COL_WIDTH   = 110   -- wider to fit "Alch 40/45"
+    local SEC_COL_WIDTH    = 70
+    local ROW_HEIGHT       = 22
 
-    local minWidth = math.max(420, totalWidth + 60)
-    summaryFrame:SetWidth(math.min(minWidth, 950))
+    local COOKING_ID       = 185
+    local FISHING_ID       = 356
+    local ARCHAEOLOGY_ID   = 794
+
+    local totalWidth = NAME_COL_WIDTH + (2 * MAIN_COL_WIDTH) + (3 * SEC_COL_WIDTH)
+    summaryFrame:SetWidth(math.max(520, totalWidth + 70))
 
     -- Clear old content
     local headerFrame = summaryFrame.headerFrame
@@ -364,23 +450,25 @@ function PK:RefreshSummaryWindow()
     end
     scrollChild.children = {}
 
-    -- "Character" header
-    local nameHeader = headerFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    nameHeader:SetPoint("TOPLEFT", 4, 0)
-    nameHeader:SetWidth(NAME_COL_WIDTH)
-    nameHeader:SetJustifyH("LEFT")
-    nameHeader:SetText("Character")
-    table.insert(headerFrame.children, nameHeader)
+    -- Column headers
+    local headers = {
+        { text = "Character", width = NAME_COL_WIDTH, justify = "LEFT" },
+        { text = "Prof 1",    width = MAIN_COL_WIDTH, justify = "CENTER" },
+        { text = "Prof 2",    width = MAIN_COL_WIDTH, justify = "CENTER" },
+        { text = "Cook",      width = SEC_COL_WIDTH,  justify = "CENTER" },
+        { text = "Fish",      width = SEC_COL_WIDTH,  justify = "CENTER" },
+        { text = "Arch",      width = SEC_COL_WIDTH,  justify = "CENTER" },
+    }
 
-    -- Profession column headers
-    for colIdx, skillLineID in ipairs(activeProfessions) do
-        local shortName = PK.ProfessionShortNames[skillLineID] or "?"
+    local xCursor = 4
+    for _, hdr in ipairs(headers) do
         local colHeader = headerFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        colHeader:SetPoint("TOPLEFT", NAME_COL_WIDTH + ((colIdx - 1) * PROF_COL_WIDTH), 0)
-        colHeader:SetWidth(PROF_COL_WIDTH)
-        colHeader:SetJustifyH("CENTER")
-        colHeader:SetText(shortName)
+        colHeader:SetPoint("TOPLEFT", xCursor, 0)
+        colHeader:SetWidth(hdr.width)
+        colHeader:SetJustifyH(hdr.justify)
+        colHeader:SetText(hdr.text)
         table.insert(headerFrame.children, colHeader)
+        xCursor = xCursor + hdr.width
     end
 
     -- Divider line
@@ -421,62 +509,55 @@ function PK:RefreshSummaryWindow()
         nameText:SetText(nameStr)
         table.insert(scrollChild.children, nameText)
 
-        -- Profession data cells (clickable buttons)
-        for colIdx, skillLineID in ipairs(activeProfessions) do
-            local profData = char.professions[skillLineID]
-            local xPos = NAME_COL_WIDTH + ((colIdx - 1) * PROF_COL_WIDTH)
-
-            -- Create a clickable button for this cell
-            local cellBtn = CreateFrame("Button", nil, scrollChild)
-            cellBtn:SetPoint("TOPLEFT", xPos, yOffset)
-            cellBtn:SetSize(PROF_COL_WIDTH, ROW_HEIGHT)
-            table.insert(scrollChild.children, cellBtn)
-
-            local cellText = cellBtn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-            cellText:SetAllPoints()
-            cellText:SetJustifyH("CENTER")
-            cellText:SetJustifyV("MIDDLE")
-
-            if profData then
-                if profData.hasSpec == false then
-                    cellText:SetText("|cff888888" .. (profData.skillLevel or 0) .. "|r")
-                else
-                    local spent = profData.totalKnowledgeSpent or 0
-                    local unspent = profData.unspentKnowledge or 0
-
-                    if unspent > 0 then
-                        cellText:SetText(string.format("|cff00ff00%d|r/|cffffd700%d|r",
-                            spent, spent + unspent))
-                    elseif spent > 0 then
-                        cellText:SetText("|cffffffff" .. spent .. "|r")
-                    else
-                        cellText:SetText("|cff5555550|r")
-                    end
-                end
-
-                -- Highlight on hover
-                local highlight = cellBtn:CreateTexture(nil, "HIGHLIGHT")
-                highlight:SetAllPoints()
-                highlight:SetColorTexture(1, 1, 1, 0.1)
-
-                -- Click to show detail
-                local charKey = char.charKey
-                local profID = skillLineID
-                cellBtn:SetScript("OnClick", function()
-                    PK:ShowDetailPanel(charKey, profID)
-                end)
-
-                -- Tooltip on hover showing tab summary
-                cellBtn:SetScript("OnEnter", function(btn)
-                    PK:ShowCellTooltip(btn, charKey, profID, profData)
-                end)
-                cellBtn:SetScript("OnLeave", function()
-                    GameTooltip:Hide()
-                end)
-            else
-                cellText:SetText("|cff333333—|r")
+        -- Determine this character's main professions (not cooking/fishing/archaeology)
+        local mainProfs = {}
+        for skillLineID, profData in pairs(char.professions) do
+            if not PK.SecondaryProfessions[skillLineID] then
+                table.insert(mainProfs, { id = skillLineID, data = profData })
             end
         end
+        -- Sort main profs by display order
+        table.sort(mainProfs, function(a, b)
+            return (orderMap[a.id] or 999) < (orderMap[b.id] or 999)
+        end)
+
+        -- Columns: Prof 1, Prof 2, Cook, Fish, Arch
+        local xPos = 4 + NAME_COL_WIDTH
+
+        -- Prof 1
+        local prof1 = mainProfs[1]
+        local prof1Text = prof1
+            and FormatProfCell(prof1.data, true)
+            or "|cff333333—|r"
+        CreateGridCell(scrollChild, xPos, yOffset, MAIN_COL_WIDTH, ROW_HEIGHT,
+            prof1Text, char.charKey, prof1 and prof1.id or 0, prof1 and prof1.data or nil)
+        xPos = xPos + MAIN_COL_WIDTH
+
+        -- Prof 2
+        local prof2 = mainProfs[2]
+        local prof2Text = prof2
+            and FormatProfCell(prof2.data, true)
+            or "|cff333333—|r"
+        CreateGridCell(scrollChild, xPos, yOffset, MAIN_COL_WIDTH, ROW_HEIGHT,
+            prof2Text, char.charKey, prof2 and prof2.id or 0, prof2 and prof2.data or nil)
+        xPos = xPos + MAIN_COL_WIDTH
+
+        -- Cooking
+        local cookData = char.professions[COOKING_ID]
+        CreateGridCell(scrollChild, xPos, yOffset, SEC_COL_WIDTH, ROW_HEIGHT,
+            FormatProfCell(cookData, false), char.charKey, COOKING_ID, cookData)
+        xPos = xPos + SEC_COL_WIDTH
+
+        -- Fishing
+        local fishData = char.professions[FISHING_ID]
+        CreateGridCell(scrollChild, xPos, yOffset, SEC_COL_WIDTH, ROW_HEIGHT,
+            FormatProfCell(fishData, false), char.charKey, FISHING_ID, fishData)
+        xPos = xPos + SEC_COL_WIDTH
+
+        -- Archaeology
+        local archData = char.professions[ARCHAEOLOGY_ID]
+        CreateGridCell(scrollChild, xPos, yOffset, SEC_COL_WIDTH, ROW_HEIGHT,
+            FormatProfCell(archData, false), char.charKey, ARCHAEOLOGY_ID, archData)
 
         yOffset = yOffset - ROW_HEIGHT
     end
@@ -486,7 +567,7 @@ function PK:RefreshSummaryWindow()
     local legend = scrollChild:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     legend:SetPoint("TOPLEFT", 4, yOffset)
     legend:SetTextColor(0.5, 0.5, 0.5)
-    legend:SetText("|cff00ff00Green|r = spent  |cffffd700Gold|r = total (spent+unspent)  |cff888888*|r = current char  Click cell for tree details")
+    legend:SetText("|cff00ff00Green|r = spent  |cffffd700Gold|r = total (spent+unspent)  |cff888888*|r = current char  Click cell for details")
     table.insert(scrollChild.children, legend)
 
     yOffset = yOffset - ROW_HEIGHT

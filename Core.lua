@@ -123,9 +123,10 @@ function PK:ScanAllProfessions()
     end
 
     -- Get basic profession info first (always works)
-    local prof1, prof2, cooking = GetProfessions()
+    -- GetProfessions() returns: prof1, prof2, archaeology, fishing, cooking
+    local prof1, prof2, archaeology, fishing, cooking = GetProfessions()
     local basicInfo = {}  -- baseSkillLineID → { name, icon, skillLevel, maxSkillLevel }
-    for _, profIndex in ipairs({ prof1, prof2, cooking }) do
+    for _, profIndex in ipairs({ prof1, prof2, archaeology, fishing, cooking }) do
         if profIndex then
             local name, icon, skillLevel, maxSkillLevel, _, _, skillLineID = GetProfessionInfo(profIndex)
             if skillLineID and name then
