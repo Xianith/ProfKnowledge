@@ -812,9 +812,11 @@ function PK:RefreshOverlay()
         return
     end
 
-    -- Try to determine the current profession's BASE skillLineID
-    -- (our data is keyed by base ID, but the frame may report the variant ID)
+    -- Determine the current profession's BASE skillLineID and expansion variant ID.
+    -- Our data is keyed by base ID, but we filter by variant so only alts
+    -- with the same expansion specializations are shown.
     local skillLineID = nil
+    local currentVariantID = nil
     local profName = nil
 
     if profFrame.professionInfo then
@@ -822,6 +824,8 @@ function PK:RefreshOverlay()
         skillLineID = profFrame.professionInfo.parentProfessionID
             or profFrame.professionInfo.professionID
             or profFrame.professionInfo.skillLineID
+        -- professionID is the expansion-specific variant (e.g., Midnight Alchemy)
+        currentVariantID = profFrame.professionInfo.professionID
         profName = profFrame.professionInfo.parentProfessionName
             or profFrame.professionInfo.professionName
     end
@@ -832,10 +836,19 @@ function PK:RefreshOverlay()
                 and C_TradeSkillUI.GetBaseProfessionInfo()
         end)
         if ok and info then
-            -- GetBaseProfessionInfo should return the base ID
             skillLineID = info.professionID or info.skillLineID
             profName = info.professionName
         end
+    end
+
+    -- Also try to get the variant via child profession info
+    if not currentVariantID then
+        pcall(function()
+            local childInfo = C_TradeSkillUI.GetChildProfessionInfo()
+            if childInfo then
+                currentVariantID = childInfo.professionID
+            end
+        end)
     end
 
     if not skillLineID then
@@ -843,16 +856,15 @@ function PK:RefreshOverlay()
         return
     end
 
-    -- Try to find characters with this profession
-    -- First try the ID we found (should be base ID)
-    local chars = self:GetAllCharactersForProfession(skillLineID)
+    -- Try to find characters with this profession, filtered to the current expansion
+    local chars = self:GetAllCharactersForProfession(skillLineID, currentVariantID)
 
-    -- If no results, the frame may have given us a variant ID instead
-    -- Try looking up the base ID from our variant cache
+    -- If no results, the frame may have given us a variant ID instead of a base ID.
+    -- Try looking up the base ID from our variant cache.
     if #chars == 0 and self.db and self.db.discoveredVariants then
         for baseID, variantID in pairs(self.db.discoveredVariants) do
             if variantID == skillLineID then
-                chars = self:GetAllCharactersForProfession(baseID)
+                chars = self:GetAllCharactersForProfession(baseID, currentVariantID)
                 if #chars > 0 then
                     skillLineID = baseID
                     break
@@ -971,19 +983,30 @@ end
 -- to each node's tooltip on hover.
 ----------------------------------------------------------------------
 
-local specTreeHooked    = false
-local cachedAltNodeData = nil   -- { [lowerNodeName] = { {charKey,className,rank,maxRanks}, ... } }
-local cachedProfBaseID  = nil
+local specTreeHooked      = false
+local cachedAltNodeData   = nil   -- { [lowerNodeName] = { {charKey,className,rank,maxRanks}, ... } }
+local cachedProfBaseID    = nil
+local cachedProfVariantID = nil
 
 --- Build a table of every node that ANY other character has points in
---- for a given base profession.
-function PK:BuildAltNodeLookup(baseSkillLineID)
+--- for a given base profession, optionally filtered to a specific expansion variant.
+function PK:BuildAltNodeLookup(baseSkillLineID, filterVariantID)
     local lookup = {}
     if not self.db or not self.db.characters then return lookup end
 
     for charKey, charData in pairs(self.db.characters) do
         local profData = charData.professions and charData.professions[baseSkillLineID]
         if profData and profData.tabs then
+            -- Only include data from matching expansion variant (e.g. Midnight vs TWW)
+            local variantMatch = (not filterVariantID)
+                or (profData.variantID and profData.variantID == filterVariantID)
+                or (profData.skillLineID and profData.skillLineID == filterVariantID)
+            if not variantMatch then
+                PK:Debug("BuildAltNodeLookup: skipping " .. charKey
+                    .. " variant=" .. tostring(profData.variantID)
+                    .. " (want " .. tostring(filterVariantID) .. ")")
+            end
+            if variantMatch then
             for _, tabData in pairs(profData.tabs) do
                 if tabData.nodes then
                     for _, node in ipairs(tabData.nodes) do
@@ -1002,6 +1025,7 @@ function PK:BuildAltNodeLookup(baseSkillLineID)
                     end
                 end
             end
+            end  -- if variantMatch
         end
     end
 
@@ -1094,11 +1118,13 @@ function PK:UpdateSpecTreeHighlights()
         return
     end
 
-    -- Rebuild the cache when the profession changes
-    if baseID ~= cachedProfBaseID then
-        cachedAltNodeData = self:BuildAltNodeLookup(baseID)
-        cachedProfBaseID  = baseID
-        PK:Debug("Spec highlights: rebuilt cache for baseID " .. tostring(baseID))
+    -- Rebuild the cache when the profession or expansion variant changes
+    if baseID ~= cachedProfBaseID or variantID ~= cachedProfVariantID then
+        cachedAltNodeData   = self:BuildAltNodeLookup(baseID, variantID)
+        cachedProfBaseID    = baseID
+        cachedProfVariantID = variantID
+        PK:Debug("Spec highlights: rebuilt cache for baseID "
+            .. tostring(baseID) .. " variant " .. tostring(variantID))
     end
 
     -- Obtain the configID for this variant so we can resolve node names
@@ -1133,7 +1159,7 @@ function PK:UpdateSpecTreeHighlights()
                         if not button.pkHighlight then
                             local glow = button:CreateTexture(nil, "OVERLAY", nil, 7)
                             glow:SetPoint("CENTER", 0, 0)
-                            local size = (math.min(button:GetWidth(), button:GetHeight()) + 6) * 0.95
+                            local size = (math.min(button:GetWidth(), button:GetHeight()) + 6) * 0.90
                             glow:SetSize(size, size)
                             glow:SetTexture("Interface\\CHARACTERFRAME\\TempPortraitAlphaMask")
                             glow:SetVertexColor(0, 1, 0, 0.35)
@@ -1203,7 +1229,8 @@ function PK:SetupSpecTreeOverlay()
 
     -- When the Specializations tab is shown
     specPage:HookScript("OnShow", function()
-        cachedProfBaseID = nil          -- force cache refresh
+        cachedProfBaseID    = nil       -- force cache refresh
+        cachedProfVariantID = nil
         C_Timer.After(0.5, function()
             PK:UpdateSpecTreeHighlights()
         end)
@@ -1212,7 +1239,8 @@ function PK:SetupSpecTreeOverlay()
     -- When a different spec tab is selected (SetTalentTreeID)
     if specPage.SetTalentTreeID then
         hooksecurefunc(specPage, "SetTalentTreeID", function()
-            cachedProfBaseID = nil
+            cachedProfBaseID    = nil
+            cachedProfVariantID = nil
             C_Timer.After(0.3, function()
                 PK:UpdateSpecTreeHighlights()
             end)

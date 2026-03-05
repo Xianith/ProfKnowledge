@@ -113,21 +113,30 @@ end
 -- Cross-character queries
 ----------------------------------------------------------------------
 
---- Get all characters that have a specific profession
+--- Get all characters that have a specific profession.
+--- If filterVariantID is given, only returns characters whose stored
+--- variantID matches (same expansion, e.g. Midnight vs TWW).
 --- Returns: { { charKey, className, classID, level, profData }, ... }
-function PK:GetAllCharactersForProfession(skillLineID)
+function PK:GetAllCharactersForProfession(skillLineID, filterVariantID)
     local results = {}
     if not self.db or not self.db.characters then return results end
 
     for charKey, charData in pairs(self.db.characters) do
         if charData.professions and charData.professions[skillLineID] then
-            table.insert(results, {
-                charKey   = charKey,
-                className = charData.className,
-                classID   = charData.classID,
-                level     = charData.level,
-                profData  = charData.professions[skillLineID],
-            })
+            local profData = charData.professions[skillLineID]
+            -- Filter by expansion variant when requested
+            local variantMatch = (not filterVariantID)
+                or (profData.variantID and profData.variantID == filterVariantID)
+                or (profData.skillLineID and profData.skillLineID == filterVariantID)
+            if variantMatch then
+                table.insert(results, {
+                    charKey   = charKey,
+                    className = charData.className,
+                    classID   = charData.classID,
+                    level     = charData.level,
+                    profData  = profData,
+                })
+            end
         end
     end
 
