@@ -1123,12 +1123,14 @@ function PK:UpdateSpecTreeHighlights()
                     local altData = cachedAltNodeData[nodeName:lower()]
 
                     if altData and #altData > 0 then
-                        -- ---- green highlight ----
+                        -- ---- circular green highlight ----
                         if not button.pkHighlight then
                             local glow = button:CreateTexture(nil, "OVERLAY", nil, 7)
-                            glow:SetPoint("TOPLEFT", -3, 3)
-                            glow:SetPoint("BOTTOMRIGHT", 3, -3)
-                            glow:SetColorTexture(0, 1, 0, 0.3)
+                            glow:SetPoint("CENTER", 0, 0)
+                            local size = math.min(button:GetWidth(), button:GetHeight()) + 6
+                            glow:SetSize(size, size)
+                            glow:SetTexture("Interface\\CHARACTERFRAME\\TempPortraitAlphaMask")
+                            glow:SetVertexColor(0, 1, 0, 0.35)
                             glow:SetBlendMode("ADD")
                             button.pkHighlight = glow
                         end
