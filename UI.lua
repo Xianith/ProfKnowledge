@@ -1734,13 +1734,19 @@ function PK:CreateProfessionsBookButton()
     tab.defaultAnchor = true
 
     -- Helper to swap between active / inactive tab textures
+    local ACTIVE_H  = 45
+    local INACTIVE_H = 40   -- 5px shorter (bottom raised, top stays)
     local function SetTabActive(active)
         local tex = active
             and "Interface\\PaperDollInfoFrame\\UI-Character-ActiveTab"
             or  "Interface\\PaperDollInfoFrame\\UI-Character-InActiveTab"
+        local h = active and ACTIVE_H or INACTIVE_H
         leftTex:SetTexture(tex)
+        leftTex:SetHeight(h)
         midTex:SetTexture(tex)
+        midTex:SetHeight(h)
         rightTex:SetTexture(tex)
+        rightTex:SetHeight(h)
         if active then
             label:SetFontObject("GameFontNormalSmall")
             label:SetText("|cff00ccffPK|r")
