@@ -353,16 +353,29 @@ function PK:StripForSync(charData)
                 totalKnowledgeSpent = profData.totalKnowledgeSpent,
             }
 
-            -- Include tab summaries (but not individual nodes)
+            -- Include tab summaries and node data
             if profData.tabs then
                 profCopy.tabs = {}
                 for tabID, tabData in pairs(profData.tabs) do
-                    profCopy.tabs[tabID] = {
+                    local tabCopy = {
                         name        = tabData.name,
                         pointsSpent = tabData.pointsSpent,
                         maxPoints   = tabData.maxPoints,
-                        -- nodes omitted to save bandwidth
                     }
+                    -- Include node data (name, rank, maxRanks) for spec overlay
+                    if tabData.nodes then
+                        tabCopy.nodes = {}
+                        for _, node in ipairs(tabData.nodes) do
+                            if node.currentRank and node.currentRank > 0 then
+                                table.insert(tabCopy.nodes, {
+                                    name        = node.name,
+                                    currentRank = node.currentRank,
+                                    maxRanks    = node.maxRanks,
+                                })
+                            end
+                        end
+                    end
+                    profCopy.tabs[tabID] = tabCopy
                 end
             end
 
