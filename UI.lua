@@ -1525,27 +1525,27 @@ function PK:UpdateSpecTreeHighlights()
                                 local offsets = { {-1,0}, {1,0}, {0,-1}, {0,1} }
                                 button.pkRankShadows = {}
                                 for _, off in ipairs(offsets) do
-                                    local shadow = button:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-                                    shadow:SetPoint("CENTER", button, "CENTER", off[1], -14 + off[2])
+                                    local shadow = button:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+                                    shadow:SetPoint("CENTER", button, "CENTER", off[1], -34 + off[2])
                                     shadow:SetTextColor(0, 0, 0, 1)
                                     table.insert(button.pkRankShadows, shadow)
                                 end
                                 -- Diagonal shadows for thicker outline
                                 local diags = { {-1,-1}, {1,-1}, {-1,1}, {1,1} }
                                 for _, off in ipairs(diags) do
-                                    local shadow = button:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-                                    shadow:SetPoint("CENTER", button, "CENTER", off[1], -14 + off[2])
+                                    local shadow = button:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+                                    shadow:SetPoint("CENTER", button, "CENTER", off[1], -34 + off[2])
                                     shadow:SetTextColor(0, 0, 0, 1)
                                     table.insert(button.pkRankShadows, shadow)
                                 end
                                 -- Main blue text on top
-                                local rankText = button:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-                                rankText:SetPoint("CENTER", button, "CENTER", 0, -14)
+                                local rankText = button:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+                                rankText:SetPoint("CENTER", button, "CENTER", 0, -34)
                                 button.pkRankText = rankText
                             end
                             local label = tostring(highestRank)
                             button.pkRankText:SetText(label)
-                            button.pkRankText:SetTextColor(0.0, 0.44, 0.87, 1)
+                            button.pkRankText:SetTextColor(0.3, 0.6, 1.0, 1)
                             button.pkRankText:Show()
                             for _, shadow in ipairs(button.pkRankShadows) do
                                 shadow:SetText(label)
