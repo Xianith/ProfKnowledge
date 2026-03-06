@@ -1521,6 +1521,23 @@ function PK:UpdateSpecTreeHighlights()
                             end
                         end
 
+                        -- Find Blizzard's green rank FontString (cache on button)
+                        if not button.pkBlizzRankText then
+                            local found = button.SpendText or button.PointSpendText or button.RankText
+                            if not found then
+                                for _, region in ipairs({ button:GetRegions() }) do
+                                    if region:IsObjectType("FontString") then
+                                        local txt = region:GetText()
+                                        if txt and txt:match("^%d+$") then
+                                            found = region
+                                            break
+                                        end
+                                    end
+                                end
+                            end
+                            button.pkBlizzRankText = found or false
+                        end
+
                         -- Show orange overlay number if current char has top rank
                         if currentCharRank > 0 and currentCharRank >= highestRank then
                             if not button.pkOrangeText then
@@ -1530,14 +1547,17 @@ function PK:UpdateSpecTreeHighlights()
                                     {-1,-1}, {1,-1}, {-1,1}, {1,1},
                                 }
                                 button.pkOrangeShadows = {}
+                                local fontPath, fontSize, fontFlags = GameFontNormal:GetFont()
                                 for _, off in ipairs(offsets) do
-                                    local shadow = button:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-                                    shadow:SetPoint("CENTER", button, "CENTER", off[1], -14 + off[2])
+                                    local shadow = button:CreateFontString(nil, "OVERLAY", nil, 7)
+                                    shadow:SetFont(fontPath, fontSize + 3, fontFlags)
+                                    shadow:SetPoint("BOTTOM", button, "BOTTOM", off[1], -2 + off[2])
                                     shadow:SetTextColor(0, 0, 0, 1)
                                     table.insert(button.pkOrangeShadows, shadow)
                                 end
-                                local orangeText = button:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-                                orangeText:SetPoint("CENTER", button, "CENTER", 0, -14)
+                                local orangeText = button:CreateFontString(nil, "OVERLAY", nil, 7)
+                                orangeText:SetFont(fontPath, fontSize + 3, fontFlags)
+                                orangeText:SetPoint("BOTTOM", button, "BOTTOM", 0, -2)
                                 button.pkOrangeText = orangeText
                             end
                             local label = tostring(currentCharRank)
@@ -1548,12 +1568,20 @@ function PK:UpdateSpecTreeHighlights()
                                 shadow:SetText(label)
                                 shadow:Show()
                             end
+                            -- Hide Blizzard's green rank text so orange replaces it cleanly
+                            if button.pkBlizzRankText then
+                                button.pkBlizzRankText:Hide()
+                            end
                         else
                             if button.pkOrangeText then
                                 button.pkOrangeText:Hide()
                                 for _, shadow in ipairs(button.pkOrangeShadows) do
                                     shadow:Hide()
                                 end
+                            end
+                            -- Restore Blizzard's green rank text
+                            if button.pkBlizzRankText then
+                                button.pkBlizzRankText:Show()
                             end
                         end
 
@@ -1578,8 +1606,9 @@ function PK:UpdateSpecTreeHighlights()
                         button.pkHighlight:SetVertexColor(cr, cg, cb, ca)
                         button.pkHighlight:Show()
 
-                        -- ── Blue rank number (only for partial/blue nodes) ──
-                        if bestState == "blue" then
+                        -- ── Blue rank number (only for partial/blue nodes, hidden when orange is showing) ──
+                        local showingOrange = currentCharRank > 0 and currentCharRank >= highestRank
+                        if bestState == "blue" and not showingOrange then
                             if not button.pkRankText then
                                 local offsets = {
                                     {-1,0}, {1,0}, {0,-1}, {0,1},

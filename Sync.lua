@@ -477,8 +477,9 @@ function PK:ProcessSyncRequest(sender, payload)
         }, sender)
     end
 
-    -- If nothing to send or pull, send an empty response so requester knows sync is done
-    if not next(toSend) and #toPull == 0 then
+    -- If we had nothing to send, still send an empty SYNC_RESP so
+    -- the requester knows sync is acknowledged and won't time out
+    if not next(toSend) then
         self:SendWhisperMessage(PK.MSG_SYNC_RESP, {
             data       = {},
             chunkIndex = 1,
