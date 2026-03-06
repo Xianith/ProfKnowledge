@@ -559,6 +559,11 @@ local function SetupProfessionUI()
     if PK.SetupSpecTreeOverlay then
         PK:SetupSpecTreeOverlay()
     end
+
+    -- Add PK button directly to the ProfessionsFrame title bar
+    if PK.CreateProfessionFrameButton then
+        PK:CreateProfessionFrameButton()
+    end
 end
 
 local function SetupProfessionButton()

@@ -249,7 +249,7 @@ function PK:CreateSummaryWindow()
     -- Scroll frame for grid rows
     local scrollFrame = CreateFrame("ScrollFrame", nil, frame, "UIPanelScrollFrameTemplate")
     scrollFrame:SetPoint("TOPLEFT", 16, -110)
-    scrollFrame:SetPoint("BOTTOMRIGHT", -36, 42)
+    scrollFrame:SetPoint("BOTTOMRIGHT", -36, 64)
     frame.scrollFrame = scrollFrame
 
     local scrollChild = CreateFrame("Frame", nil, scrollFrame)
@@ -267,7 +267,80 @@ function PK:CreateSummaryWindow()
         end
     end)
 
-    -- Bottom button bar: Import / Export
+    -- ── Sync status bar ──
+    local syncBar = CreateFrame("Button", nil, frame)
+    syncBar:SetHeight(22)
+    syncBar:SetPoint("BOTTOMLEFT", 16, 38)
+    syncBar:SetPoint("BOTTOMRIGHT", -16, 38)
+    frame.syncBar = syncBar
+
+    -- Sync bar background
+    local syncBg = syncBar:CreateTexture(nil, "BACKGROUND")
+    syncBg:SetAllPoints()
+    syncBg:SetColorTexture(0.08, 0.15, 0.12, 0.8)
+
+    -- Sync icon (left side)
+    local syncIcon = syncBar:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    syncIcon:SetPoint("LEFT", 6, 0)
+    frame.syncIcon = syncIcon
+
+    -- Sync text (center)
+    local syncText = syncBar:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    syncText:SetPoint("LEFT", syncIcon, "RIGHT", 4, 0)
+    syncText:SetPoint("RIGHT", -6, 0)
+    syncText:SetJustifyH("LEFT")
+    frame.syncText = syncText
+
+    -- Click to force sync
+    syncBar:SetScript("OnClick", function()
+        if PK.commReady then
+            PK.syncPending = false
+            PK:RequestSync()
+            PK:Print("Sync requested.")
+            PK:RefreshSyncStatus()
+        else
+            PK:Print("Guild sync is not active.")
+        end
+    end)
+
+    syncBar:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("|cff00ccffGuild Sync|r")
+        if PK.commReady then
+            GameTooltip:AddLine("Click to force sync with guild", 1, 1, 1, true)
+            local count = PK:GetAddonUserCount and PK:GetAddonUserCount() or 0
+            if count > 0 then
+                GameTooltip:AddLine(" ")
+                GameTooltip:AddLine("Online addon users:", 0.7, 0.7, 0.7)
+                local sorted = {}
+                for name in pairs(PK.addonUsers or {}) do
+                    table.insert(sorted, name)
+                end
+                table.sort(sorted)
+                for i, name in ipairs(sorted) do
+                    local role = ""
+                    if i == 1 then role = " |cffffd700(DR)|r" end
+                    if i == 2 then role = " |cffaaaaaa(BDR)|r" end
+                    local isMe = (name == UnitName("player"))
+                    local color = isMe and "|cff00ff00" or "|cffffffff"
+                    GameTooltip:AddLine("  " .. color .. name .. "|r" .. role)
+                end
+            end
+            local rosterCount = PK.GetGuildRosterCount and PK:GetGuildRosterCount() or 0
+            if rosterCount > 0 then
+                GameTooltip:AddLine(" ")
+                GameTooltip:AddLine("Guild roster: " .. rosterCount .. " characters tracked", 0.5, 0.5, 0.5)
+            end
+        else
+            GameTooltip:AddLine("Not connected — sync is disabled", 1, 0.3, 0.3, true)
+        end
+        GameTooltip:Show()
+    end)
+    syncBar:SetScript("OnLeave", function()
+        GameTooltip:Hide()
+    end)
+
+    -- Bottom button bar: Import / Export (below sync bar)
     local exportBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     exportBtn:SetSize(80, 22)
     exportBtn:SetPoint("BOTTOMRIGHT", -16, 12)
@@ -286,6 +359,47 @@ function PK:CreateSummaryWindow()
 
     frame:Hide()
     return frame
+end
+
+----------------------------------------------------------------------
+-- Refresh the sync status bar in the summary window
+----------------------------------------------------------------------
+
+function PK:RefreshSyncStatus()
+    if not summaryFrame then return end
+
+    local syncIcon = summaryFrame.syncIcon
+    local syncText = summaryFrame.syncText
+
+    if not syncIcon or not syncText then return end
+
+    if PK.commReady then
+        local count = PK.GetAddonUserCount and PK:GetAddonUserCount() or 0
+        local rosterCount = PK.GetGuildRosterCount and PK:GetGuildRosterCount() or 0
+        local role = PK.syncRole or "—"
+
+        if count > 0 then
+            syncIcon:SetText("|cff00ff00\226\151\143|r")  -- green circle
+            local userLabel = count == 1 and "user" or "users"
+            syncText:SetText("|cff00ff00" .. count .. "|r addon " .. userLabel .. " online"
+                .. "  |cff888888\194\183|r  "
+                .. rosterCount .. " guild chars tracked"
+                .. "  |cff888888\194\183|r  "
+                .. "|cff888888" .. role .. "|r")
+        else
+            syncIcon:SetText("|cffffd700\226\151\143|r")  -- yellow circle
+            syncText:SetText("Waiting for guild members...")
+        end
+    else
+        local guildSync = PK:GetSetting("guildSync")
+        if guildSync then
+            syncIcon:SetText("|cff888888\226\151\143|r")  -- gray circle
+            syncText:SetText("|cff888888Sync initializing...|r")
+        else
+            syncIcon:SetText("|cffff4444\226\151\143|r")  -- red circle
+            syncText:SetText("|cff888888Guild sync disabled|r |cff555555(/pk guildsync)|r")
+        end
+    end
 end
 
 ----------------------------------------------------------------------
@@ -411,13 +525,14 @@ function PK:RefreshSummaryWindow()
     local NAME_COL_WIDTH   = 130
     local MAIN_COL_WIDTH   = 110   -- wider to fit "Ench 40/45"
     local SEC_COL_WIDTH    = 70
+    local DEL_COL_WIDTH    = 22
     local ROW_HEIGHT       = 22
 
     local COOKING_ID       = 185
     local FISHING_ID       = 356
 
-    local totalWidth = NAME_COL_WIDTH + (2 * MAIN_COL_WIDTH) + (2 * SEC_COL_WIDTH)
-    summaryFrame:SetWidth(math.max(520, totalWidth + 70))
+    local totalWidth = NAME_COL_WIDTH + (2 * MAIN_COL_WIDTH) + (2 * SEC_COL_WIDTH) + DEL_COL_WIDTH
+    summaryFrame:SetWidth(math.max(540, totalWidth + 70))
 
     -- Clear old content
     local headerFrame = summaryFrame.headerFrame
@@ -439,13 +554,14 @@ function PK:RefreshSummaryWindow()
     end
     scrollChild.children = {}
 
-    -- Column headers — fixed 4-column layout
+    -- Column headers — fixed 4-column layout + delete
     local headers = {
         { text = "Character", width = NAME_COL_WIDTH, justify = "LEFT" },
         { text = "Prof 1",    width = MAIN_COL_WIDTH, justify = "CENTER" },
         { text = "Prof 2",    width = MAIN_COL_WIDTH, justify = "CENTER" },
         { text = "Cook",      width = SEC_COL_WIDTH,  justify = "CENTER" },
         { text = "Fish",      width = SEC_COL_WIDTH,  justify = "CENTER" },
+        { text = "",           width = DEL_COL_WIDTH,  justify = "CENTER" },
     }
 
     local xCursor = 4
@@ -547,6 +663,53 @@ function PK:RefreshSummaryWindow()
         local fishData = char.professions[FISHING_ID]
         CreateGridCell(scrollChild, xPos, yOffset, SEC_COL_WIDTH, ROW_HEIGHT,
             FormatProfCell(fishData, false), char.charKey, FISHING_ID, fishData)
+        xPos = xPos + SEC_COL_WIDTH
+
+        -- Delete (X) button — don't show for current character
+        if not isCurrentChar then
+            local delBtn = CreateFrame("Button", nil, scrollChild)
+            delBtn:SetPoint("TOPLEFT", xPos, yOffset)
+            delBtn:SetSize(DEL_COL_WIDTH, ROW_HEIGHT)
+            table.insert(scrollChild.children, delBtn)
+
+            local delText = delBtn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            delText:SetAllPoints()
+            delText:SetJustifyH("CENTER")
+            delText:SetJustifyV("MIDDLE")
+            delText:SetText("|cff555555\195\151|r")  -- × symbol, dim
+
+            -- Hover highlight
+            delBtn:SetScript("OnEnter", function(self)
+                delText:SetText("|cffff4444\195\151|r")  -- red on hover
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:AddLine("Remove " .. char.charKey)
+                GameTooltip:AddLine("Click to delete this character's data", 0.7, 0.7, 0.7, true)
+                GameTooltip:Show()
+            end)
+            delBtn:SetScript("OnLeave", function()
+                delText:SetText("|cff555555\195\151|r")  -- back to dim
+                GameTooltip:Hide()
+            end)
+
+            local capturedCharKey = char.charKey
+            delBtn:SetScript("OnClick", function()
+                -- Confirm deletion via StaticPopup
+                StaticPopupDialogs["PK_DELETE_CHAR"] = {
+                    text = "Remove profession data for\n|cffffffff" .. capturedCharKey .. "|r?",
+                    button1 = "Delete",
+                    button2 = "Cancel",
+                    OnAccept = function()
+                        PK:DeleteCharacter(capturedCharKey)
+                        PK:RefreshSummaryWindow()
+                    end,
+                    timeout = 0,
+                    whileDead = true,
+                    hideOnEscape = true,
+                    preferredIndex = 3,
+                }
+                StaticPopup_Show("PK_DELETE_CHAR")
+            end)
+        end
 
         yOffset = yOffset - ROW_HEIGHT
     end
@@ -561,6 +724,9 @@ function PK:RefreshSummaryWindow()
 
     yOffset = yOffset - ROW_HEIGHT
     scrollChild:SetHeight(math.abs(yOffset) + 10)
+
+    -- Refresh the sync status bar
+    self:RefreshSyncStatus()
 end
 
 ----------------------------------------------------------------------
@@ -1498,6 +1664,43 @@ function PK:CreateProfessionButton()
     end)
 
     PK:Debug("PK button added to professions overview pane")
+end
+
+--- Button on ProfessionsFrame (the crafting/spec window itself)
+function PK:CreateProfessionFrameButton()
+    local profFrame = ProfessionsFrame
+    if not profFrame then return end
+    if profFrame.pkButton then return end  -- already created
+
+    local btn = CreateFrame("Button", nil, profFrame, "UIPanelButtonTemplate")
+    btn:SetSize(60, 20)
+    btn:SetText("|cff00ccffPK|r")
+    btn:SetFrameStrata("HIGH")
+
+    -- Try to anchor near the close button at the top-right
+    local closeBtn = profFrame.CloseButton or profFrame.ClosePanelButton
+    if closeBtn then
+        btn:SetPoint("RIGHT", closeBtn, "LEFT", -4, 0)
+    else
+        btn:SetPoint("TOPRIGHT", profFrame, "TOPRIGHT", -60, -6)
+    end
+
+    btn:SetScript("OnClick", function()
+        PK:ShowSummaryWindowAnchored(profFrame)
+    end)
+
+    btn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+        GameTooltip:AddLine("|cff00ccffProfKnowledge|r")
+        GameTooltip:AddLine("View profession knowledge across all characters", 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    btn:SetScript("OnLeave", function()
+        GameTooltip:Hide()
+    end)
+
+    profFrame.pkButton = btn
+    PK:Debug("PK button added to ProfessionsFrame")
 end
 
 function PK:ShowSummaryWindowAnchored(anchorFrame)
