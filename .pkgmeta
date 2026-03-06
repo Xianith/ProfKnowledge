@@ -1,0 +1,38 @@
+package-as: ProfKnowledge
+
+enable-nolib-creation: yes
+
+externals:
+  Libs/LibStub:
+    url: https://repos.wowace.com/wow/libstub/trunk
+    tag: latest
+  Libs/CallbackHandler-1.0:
+    url: https://repos.wowace.com/wow/ace3/trunk/CallbackHandler-1.0
+    tag: latest
+  Libs/ChatThrottleLib:
+    url: https://repos.wowace.com/wow/chatthrottlelib/trunk
+    tag: latest
+  Libs/AceSerializer-3.0:
+    url: https://repos.wowace.com/wow/ace3/trunk/AceSerializer-3.0
+    tag: latest
+  Libs/AceComm-3.0:
+    url: https://repos.wowace.com/wow/ace3/trunk/AceComm-3.0
+    tag: latest
+  Libs/LibDeflate:
+    url: https://github.com/SafeteeWoW/LibDeflate.git
+    tag: latest
+
+ignore:
+  - .github
+  - .gitignore
+  - README.md
+  - CHANGES.txt
+  - logo.jpg
+  - .claude
+  - planning.md
+  - Libs/LibDeflate/tests
+  - "*.bat"
+
+manual-changelog: CHANGES.txt
+
+license-output: LICENSE.txt
