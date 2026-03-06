@@ -1497,8 +1497,9 @@ function PK:UpdateSpecTreeHighlights()
 
                     if altData and #altData > 0 then
                         -- Determine best state across all alts for this node
-                        -- epic (purple) = fully maxed, rare (blue) = some points, common (green) = bought (0 extra)
-                        local bestState = "green"  -- default: bought
+                        -- purple = fully maxed, blue = some points, green = bought only
+                        local bestState = "green"
+                        local highestRank = 0
                         for _, alt in ipairs(altData) do
                             local dMax = alt.maxRanks or 0
                             local dRank = alt.rank or 0
@@ -1506,33 +1507,64 @@ function PK:UpdateSpecTreeHighlights()
                                 dMax = dMax - 1
                                 dRank = math.max(dRank - 1, 0)
                             end
+                            if dRank > highestRank then
+                                highestRank = dRank
+                            end
                             if dRank >= dMax and dMax > 0 then
-                                bestState = "purple"; break  -- can't do better
-                            elseif dRank > 0 then
+                                bestState = "purple"
+                            elseif dRank > 0 and bestState ~= "purple" then
                                 bestState = "blue"
                             end
                         end
-                        local r, g, b, a
-                        if bestState == "purple" then
-                            r, g, b, a = 0.64, 0.21, 0.93, 0.35  -- epic purple
-                        elseif bestState == "blue" then
-                            r, g, b, a = 0.0, 0.44, 0.87, 0.35   -- rare blue
+
+                        -- Only show overlay for blue (partial) nodes
+                        if bestState == "blue" then
+                            -- Create outlined blue rank number below the existing green number
+                            if not button.pkRankText then
+                                -- Black outline using 4 offset shadow copies
+                                local offsets = { {-1,0}, {1,0}, {0,-1}, {0,1} }
+                                button.pkRankShadows = {}
+                                for _, off in ipairs(offsets) do
+                                    local shadow = button:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+                                    shadow:SetPoint("CENTER", button, "CENTER", off[1], -14 + off[2])
+                                    shadow:SetTextColor(0, 0, 0, 1)
+                                    table.insert(button.pkRankShadows, shadow)
+                                end
+                                -- Diagonal shadows for thicker outline
+                                local diags = { {-1,-1}, {1,-1}, {-1,1}, {1,1} }
+                                for _, off in ipairs(diags) do
+                                    local shadow = button:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+                                    shadow:SetPoint("CENTER", button, "CENTER", off[1], -14 + off[2])
+                                    shadow:SetTextColor(0, 0, 0, 1)
+                                    table.insert(button.pkRankShadows, shadow)
+                                end
+                                -- Main blue text on top
+                                local rankText = button:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+                                rankText:SetPoint("CENTER", button, "CENTER", 0, -14)
+                                button.pkRankText = rankText
+                            end
+                            local label = tostring(highestRank)
+                            button.pkRankText:SetText(label)
+                            button.pkRankText:SetTextColor(0.0, 0.44, 0.87, 1)
+                            button.pkRankText:Show()
+                            for _, shadow in ipairs(button.pkRankShadows) do
+                                shadow:SetText(label)
+                                shadow:Show()
+                            end
                         else
-                            r, g, b, a = 0.12, 0.75, 0.12, 0.30   -- common green
+                            -- Purple or green: hide rank text if it was previously created
+                            if button.pkRankText then
+                                button.pkRankText:Hide()
+                                for _, shadow in ipairs(button.pkRankShadows) do
+                                    shadow:Hide()
+                                end
+                            end
                         end
 
-                        -- ---- circular highlight (sized 5% smaller) ----
-                        if not button.pkHighlight then
-                            local glow = button:CreateTexture(nil, "OVERLAY", nil, 7)
-                            glow:SetPoint("CENTER", 0, 0)
-                            local size = math.min(button:GetWidth(), button:GetHeight()) * 0.95
-                            glow:SetSize(size, size)
-                            glow:SetTexture("Interface\\CHARACTERFRAME\\TempPortraitAlphaMask")
-                            glow:SetBlendMode("ADD")
-                            button.pkHighlight = glow
+                        -- Hide old circle highlight if it exists from previous version
+                        if button.pkHighlight then
+                            button.pkHighlight:Hide()
                         end
-                        button.pkHighlight:SetVertexColor(r, g, b, a)
-                        button.pkHighlight:Show()
 
                         -- Store lookup data on the button for the tooltip
                         button.pkAltData  = altData
@@ -1581,9 +1613,15 @@ function PK:UpdateSpecTreeHighlights()
                         end
 
                     else
-                        -- No alt data — hide any previous highlight
+                        -- No alt data — hide any previous overlay
                         if button.pkHighlight then
                             button.pkHighlight:Hide()
+                        end
+                        if button.pkRankText then
+                            button.pkRankText:Hide()
+                            for _, shadow in ipairs(button.pkRankShadows) do
+                                shadow:Hide()
+                            end
                         end
                         button.pkAltData = nil
                     end
