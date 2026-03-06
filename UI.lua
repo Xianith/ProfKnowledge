@@ -372,24 +372,24 @@ function PK:RefreshSyncStatus()
         local role = PK.syncRole or "—"
 
         if count > 0 then
-            syncIcon:SetText("|cff00ff00\226\151\143|r")  -- green circle
+            syncIcon:SetText("|TInterface\\COMMON\\Indicator-Green:0|t")
             local userLabel = count == 1 and "user" or "users"
             syncText:SetText("|cff00ff00" .. count .. "|r addon " .. userLabel .. " online"
-                .. "  |cff888888\194\183|r  "
+                .. "  |cff888888·|r  "
                 .. rosterCount .. " guild chars tracked"
-                .. "  |cff888888\194\183|r  "
+                .. "  |cff888888·|r  "
                 .. "|cff888888" .. role .. "|r")
         else
-            syncIcon:SetText("|cffffd700\226\151\143|r")  -- yellow circle
+            syncIcon:SetText("|TInterface\\COMMON\\Indicator-Yellow:0|t")
             syncText:SetText("Waiting for guild members...")
         end
     else
         local guildSync = PK:GetSetting("guildSync")
         if guildSync then
-            syncIcon:SetText("|cff888888\226\151\143|r")  -- gray circle
+            syncIcon:SetText("|TInterface\\COMMON\\Indicator-Gray:0|t")
             syncText:SetText("|cff888888Sync initializing...|r")
         else
-            syncIcon:SetText("|cffff4444\226\151\143|r")  -- red circle
+            syncIcon:SetText("|TInterface\\COMMON\\Indicator-Red:0|t")
             syncText:SetText("|cff888888Guild sync disabled|r |cff555555(/pk guildsync)|r")
         end
     end
