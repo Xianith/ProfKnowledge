@@ -363,16 +363,16 @@ function PK:StripForSync(charData)
                         maxPoints   = tabData.maxPoints,
                     }
                     -- Include node data (name, rank, maxRanks) for spec overlay
+                    -- Rank 0 nodes are included — they represent purchased/unlocked
+                    -- nodes with no additional investment (shown as green on overlay)
                     if tabData.nodes then
                         tabCopy.nodes = {}
                         for _, node in ipairs(tabData.nodes) do
-                            if node.currentRank and node.currentRank > 0 then
-                                table.insert(tabCopy.nodes, {
-                                    name        = node.name,
-                                    currentRank = node.currentRank,
-                                    maxRanks    = node.maxRanks,
-                                })
-                            end
+                            table.insert(tabCopy.nodes, {
+                                name        = node.name,
+                                currentRank = node.currentRank,
+                                maxRanks    = node.maxRanks,
+                            })
                         end
                     end
                     profCopy.tabs[tabID] = tabCopy
