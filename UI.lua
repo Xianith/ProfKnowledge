@@ -1229,8 +1229,24 @@ function PK:RefreshOverlay()
     for _, gc in ipairs(guildChars) do
         if not seen[gc.charKey] and not gc.isLocal then
             table.insert(chars, gc)
+            seen[gc.charKey] = true
         end
     end
+
+    -- Also try guild roster with the variant ID as key (in case professions
+    -- were stored keyed by variant rather than base ID)
+    if currentVariantID and currentVariantID ~= skillLineID then
+        local guildVarChars = self:GetGuildCharactersForProfession(currentVariantID)
+        for _, gc in ipairs(guildVarChars) do
+            if not seen[gc.charKey] and not gc.isLocal then
+                table.insert(chars, gc)
+                seen[gc.charKey] = true
+            end
+        end
+    end
+
+    PK:Debug("RefreshOverlay: " .. #chars .. " chars for skillLine=" .. tostring(skillLineID)
+        .. " variant=" .. tostring(currentVariantID))
 
     -- Filter out characters with 0 points spent (skip current char from filter)
     local filtered = {}
@@ -1243,7 +1259,7 @@ function PK:RefreshOverlay()
     end
     chars = filtered
 
-    if #chars <= 1 then
+    if #chars == 0 then
         overlayFrame:Hide()
         return
     end
