@@ -155,11 +155,7 @@ function PK:CreateSummaryWindow()
     local frame = CreateFrame("Frame", "ProfKnowledgeSummaryFrame", UIParent, "ButtonFrameTemplate")
     frame:SetSize(660, 450)
     frame:SetPoint("CENTER")
-    frame:SetMovable(true)
     frame:EnableMouse(true)
-    frame:RegisterForDrag("LeftButton")
-    frame:SetScript("OnDragStart", frame.StartMoving)
-    frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
     frame:SetFrameStrata("DIALOG")
     frame:SetClampedToScreen(true)
 
@@ -173,49 +169,20 @@ function PK:CreateSummaryWindow()
     -- Title (provided by ButtonFrameTemplate)
     frame:SetTitle("|cff00ccffProf|r|cffffffffKnowledge|r")
 
-    -- Hide the bottom button bar (we use our own sync bar + import/export)
+    -- Hide the bottom button bar (we use our own sync bar)
     ButtonFrameTemplate_HideButtonBar(frame)
 
-    -- Adjust the Inset to leave room for sync bar + import/export at the bottom
-    frame.Inset:ClearAllPoints()
-    frame.Inset:SetPoint("TOPLEFT", frame, "TOPLEFT", 4, -60)
-    frame.Inset:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -6, 56)
-
-    -- Book/parchment background texture inside the Inset
-    local bookBg = frame.Inset:CreateTexture(nil, "BACKGROUND", nil, 1)
-    bookBg:SetAllPoints()
-    bookBg:SetTexture("Interface\\QuestFrame\\QuestBG")
-    bookBg:SetTexCoord(0, 1, 0.02, 1)
-    frame.bookBg = bookBg
-
-    -- Subtitle (character count) — inside the Inset
-    local subtitle = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    subtitle:SetPoint("TOPLEFT", frame.Inset, "TOPLEFT", 8, -4)
-    subtitle:SetTextColor(0.6, 0.6, 0.6)
-    frame.subtitle = subtitle
-
-    -- Hint text
-    local hint = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    hint:SetPoint("LEFT", subtitle, "RIGHT", 10, 0)
-    hint:SetTextColor(0.45, 0.45, 0.45)
-    hint:SetText("Click a cell for details")
-    frame.hint = hint
-
-    -- ESC to close (standard WoW mechanism)
-    tinsert(UISpecialFrames, "ProfKnowledgeSummaryFrame")
-
-    -- ── Filter row: Profession dropdown ──
-
+    -- ── Profession filter dropdown (in the title bar area) ──
     frame.selectedProfession = nil   -- nil = "All Professions"
 
     local profLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    profLabel:SetPoint("TOPLEFT", frame.Inset, "TOPLEFT", 8, -18)
+    profLabel:SetPoint("RIGHT", frame.TitleContainer or frame, "RIGHT", -40, 0)
     profLabel:SetTextColor(0.7, 0.7, 0.7)
-    profLabel:SetText("Profession:")
+    profLabel:SetText("Filter:")
 
     local profDropdown = CreateFrame("Frame", nil, frame, "UIDropDownMenuTemplate")
-    profDropdown:SetPoint("LEFT", profLabel, "RIGHT", -8, -2)
-    UIDropDownMenu_SetWidth(profDropdown, 130)
+    profDropdown:SetPoint("LEFT", profLabel, "RIGHT", -12, -2)
+    UIDropDownMenu_SetWidth(profDropdown, 120)
     frame.professionDropdown = profDropdown
 
     UIDropDownMenu_Initialize(profDropdown, function(self, level, menuList)
@@ -248,16 +215,44 @@ function PK:CreateSummaryWindow()
     end)
     UIDropDownMenu_SetText(profDropdown, "All Professions")
 
-    -- Column headers area (inside the Inset, below dropdown)
+    -- Adjust the Inset: top below title bar, bottom leaves room for sync bar
+    frame.Inset:ClearAllPoints()
+    frame.Inset:SetPoint("TOPLEFT", frame, "TOPLEFT", 4, -60)
+    frame.Inset:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -6, 30)
+
+    -- Book/parchment background texture inside the Inset
+    local bookBg = frame.Inset:CreateTexture(nil, "BACKGROUND", nil, 1)
+    bookBg:SetAllPoints()
+    bookBg:SetTexture("Interface\\QuestFrame\\QuestBG")
+    bookBg:SetTexCoord(0, 1, 0.02, 1)
+    frame.bookBg = bookBg
+
+    -- Subtitle (character count) — inside the Inset
+    local subtitle = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    subtitle:SetPoint("TOPLEFT", frame.Inset, "TOPLEFT", 8, -4)
+    subtitle:SetTextColor(0.6, 0.6, 0.6)
+    frame.subtitle = subtitle
+
+    -- Hint text
+    local hint = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    hint:SetPoint("LEFT", subtitle, "RIGHT", 10, 0)
+    hint:SetTextColor(0.45, 0.45, 0.45)
+    hint:SetText("Click a cell for details")
+    frame.hint = hint
+
+    -- ESC to close (standard WoW mechanism)
+    tinsert(UISpecialFrames, "ProfKnowledgeSummaryFrame")
+
+    -- Column headers area (inside the Inset)
     local headerFrame = CreateFrame("Frame", nil, frame.Inset)
-    headerFrame:SetPoint("TOPLEFT", frame.Inset, "TOPLEFT", 4, -42)
-    headerFrame:SetPoint("TOPRIGHT", frame.Inset, "TOPRIGHT", -4, -42)
+    headerFrame:SetPoint("TOPLEFT", frame.Inset, "TOPLEFT", 4, -18)
+    headerFrame:SetPoint("TOPRIGHT", frame.Inset, "TOPRIGHT", -4, -18)
     headerFrame:SetHeight(24)
     frame.headerFrame = headerFrame
 
     -- Scroll frame for grid rows (inside the Inset)
     local scrollFrame = CreateFrame("ScrollFrame", nil, frame.Inset, "UIPanelScrollFrameTemplate")
-    scrollFrame:SetPoint("TOPLEFT", frame.Inset, "TOPLEFT", 4, -66)
+    scrollFrame:SetPoint("TOPLEFT", frame.Inset, "TOPLEFT", 4, -42)
     scrollFrame:SetPoint("BOTTOMRIGHT", frame.Inset, "BOTTOMRIGHT", -24, 4)
     frame.scrollFrame = scrollFrame
 
@@ -266,7 +261,7 @@ function PK:CreateSummaryWindow()
     scrollFrame:SetScrollChild(scrollChild)
     frame.scrollChild = scrollChild
 
-    -- ── Sync status bar (very bottom of the frame) ──
+    -- ── Sync status bar with inline Import/Export (very bottom) ──
     local syncBar = CreateFrame("Button", nil, frame)
     syncBar:SetHeight(22)
     syncBar:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 8, 6)
@@ -278,15 +273,32 @@ function PK:CreateSummaryWindow()
     syncBg:SetAllPoints()
     syncBg:SetColorTexture(0.08, 0.15, 0.12, 0.8)
 
+    -- Import / Export buttons (right side of sync bar)
+    local exportBtn = CreateFrame("Button", nil, syncBar, "UIPanelButtonTemplate")
+    exportBtn:SetSize(60, 20)
+    exportBtn:SetPoint("RIGHT", syncBar, "RIGHT", -2, 0)
+    exportBtn:SetText("Export")
+    exportBtn:SetScript("OnClick", function()
+        PK:ShowExportWindow()
+    end)
+
+    local importBtn = CreateFrame("Button", nil, syncBar, "UIPanelButtonTemplate")
+    importBtn:SetSize(60, 20)
+    importBtn:SetPoint("RIGHT", exportBtn, "LEFT", -4, 0)
+    importBtn:SetText("Import")
+    importBtn:SetScript("OnClick", function()
+        PK:ShowImportWindow()
+    end)
+
     -- Sync icon (left side)
     local syncIcon = syncBar:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     syncIcon:SetPoint("LEFT", 6, 0)
     frame.syncIcon = syncIcon
 
-    -- Sync text (center)
+    -- Sync text (between icon and import button)
     local syncText = syncBar:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     syncText:SetPoint("LEFT", syncIcon, "RIGHT", 4, 0)
-    syncText:SetPoint("RIGHT", -6, 0)
+    syncText:SetPoint("RIGHT", importBtn, "LEFT", -8, 0)
     syncText:SetJustifyH("LEFT")
     frame.syncText = syncText
 
@@ -337,23 +349,6 @@ function PK:CreateSummaryWindow()
     end)
     syncBar:SetScript("OnLeave", function()
         GameTooltip:Hide()
-    end)
-
-    -- Import / Export buttons (above sync bar)
-    local exportBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    exportBtn:SetSize(80, 22)
-    exportBtn:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -12, 30)
-    exportBtn:SetText("Export")
-    exportBtn:SetScript("OnClick", function()
-        PK:ShowExportWindow()
-    end)
-
-    local importBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    importBtn:SetSize(80, 22)
-    importBtn:SetPoint("RIGHT", exportBtn, "LEFT", -6, 0)
-    importBtn:SetText("Import")
-    importBtn:SetScript("OnClick", function()
-        PK:ShowImportWindow()
     end)
 
     frame:Hide()
@@ -1739,9 +1734,9 @@ function PK:CreateProfessionsBookButton()
     tab:SetPoint("BOTTOMLEFT", bookFrame, "BOTTOMLEFT", 4, -30)
     tab.defaultAnchor = true
 
-    -- Click handler
+    -- Click handler (toggle)
     tab:SetScript("OnClick", function()
-        PK:ShowSummaryWindowAnchored(bookFrame)
+        PK:ToggleSummaryWindowAnchored(bookFrame)
     end)
 
     -- Tooltip
@@ -1765,10 +1760,19 @@ function PK:ShowSummaryWindowAnchored(anchorFrame)
     end
     self:RefreshSummaryWindow()
 
-    -- Anchor to the right of the profession frame
+    -- Anchor on top of the book frame (same position and size)
     summaryFrame:ClearAllPoints()
-    summaryFrame:SetPoint("TOPLEFT", anchorFrame, "TOPRIGHT", 4, 0)
+    summaryFrame:SetPoint("TOPLEFT", anchorFrame, "TOPLEFT", 0, 0)
+    summaryFrame:SetPoint("BOTTOMRIGHT", anchorFrame, "BOTTOMRIGHT", 0, 0)
     summaryFrame:Show()
+end
+
+function PK:ToggleSummaryWindowAnchored(anchorFrame)
+    if summaryFrame and summaryFrame:IsShown() then
+        summaryFrame:Hide()
+    else
+        self:ShowSummaryWindowAnchored(anchorFrame)
+    end
 end
 
 ----------------------------------------------------------------------
