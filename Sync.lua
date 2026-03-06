@@ -335,6 +335,10 @@ function PK:StripForSync(charData)
     if charData.professions then
         stripped.professions = {}
         for skillLineID, profData in pairs(charData.professions) do
+            -- Skip empty placeholder professions
+            if PK:IsEmptyProfession(profData) then
+                -- do nothing, skip this entry
+            else
             local profCopy = {
                 skillLineID         = profData.skillLineID,
                 baseSkillLineID     = profData.baseSkillLineID,
@@ -363,6 +367,7 @@ function PK:StripForSync(charData)
             end
 
             stripped.professions[skillLineID] = profCopy
+            end -- else (not empty)
         end
     end
 

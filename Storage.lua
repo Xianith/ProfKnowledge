@@ -20,7 +20,7 @@ local DB_DEFAULTS = {
         showOverlay  = true,
         showBadges   = true,
         guildSync    = true,   -- Enable guild sync by default
-        debug        = true,   -- Enable by default during development; /pk debug to toggle
+        debug        = false,  -- /pk debug to toggle
     },
 }
 
@@ -99,6 +99,17 @@ end
 ----------------------------------------------------------------------
 -- Character data operations
 ----------------------------------------------------------------------
+
+--- Returns true if a profession entry has no meaningful data (0/0 skill, no knowledge, no tabs).
+function PK:IsEmptyProfession(profData)
+    if not profData then return true end
+    local level = profData.skillLevel or 0
+    local maxLevel = profData.maxSkillLevel or 0
+    local spent = profData.totalKnowledgeSpent or 0
+    local unspent = profData.unspentKnowledge or 0
+    local hasTabs = profData.tabs and next(profData.tabs)
+    return level == 0 and maxLevel == 0 and spent == 0 and unspent == 0 and not hasTabs
+end
 
 function PK:SaveCharacterData(profData, prof1BaseID, prof2BaseID)
     if not self.db or not self.charKey then return end
@@ -180,12 +191,16 @@ function PK:GetAllCharacters(filterProfession)
     for charKey, charData in pairs(self.db.characters) do
         local profs = charData.professions or {}
 
-        -- Always filter out old-expansion professions and apply profession filter
+        -- Always filter out old-expansion professions, empties, and apply profession filter
         local filtered = {}
         for skillLineID, profData in pairs(profs) do
             local keep = true
             -- Exclude professions from old expansions (e.g. Dragon Isles)
             if profData.expansionName and PK.ExcludedExpansions[profData.expansionName] then
+                keep = false
+            end
+            -- Exclude empty placeholder professions (0/0, no knowledge, no tabs)
+            if self:IsEmptyProfession(profData) then
                 keep = false
             end
             -- Profession filter
@@ -319,10 +334,12 @@ function PK:ExportAllData()
             add("  Last Scanned: " .. date("%Y-%m-%d %H:%M", lastScanned))
         end
 
-        -- Sort professions by display order
+        -- Sort professions by display order (skip empties)
         local profKeys = {}
-        for skillLineID in pairs(char.professions) do
-            table.insert(profKeys, skillLineID)
+        for skillLineID, profData in pairs(char.professions) do
+            if not self:IsEmptyProfession(profData) then
+                table.insert(profKeys, skillLineID)
+            end
         end
         local orderMap = {}
         for i, id in ipairs(PK.ProfessionOrder) do
