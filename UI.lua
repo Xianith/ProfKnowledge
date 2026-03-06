@@ -1497,15 +1497,20 @@ function PK:UpdateSpecTreeHighlights()
 
                     if altData and #altData > 0 then
                         -- Determine best state across all alts for this node
-                        -- purple = fully maxed, blue = some points, green = bought only
+                        -- and find the current character's rank + highest alt rank
                         local bestState = "green"
                         local highestRank = 0
+                        local currentCharRank = 0
+                        local currentKey = PK.charKey
                         for _, alt in ipairs(altData) do
                             local dMax = alt.maxRanks or 0
                             local dRank = alt.rank or 0
                             if dMax % 5 ~= 0 then
                                 dMax = dMax - 1
                                 dRank = math.max(dRank - 1, 0)
+                            end
+                            if alt.charKey == currentKey then
+                                currentCharRank = dRank
                             end
                             if dRank > highestRank then
                                 highestRank = dRank
@@ -1517,7 +1522,34 @@ function PK:UpdateSpecTreeHighlights()
                             end
                         end
 
-                        -- Only show overlay for blue (partial) nodes
+                        -- Recolor existing green rank text to orange if current char
+                        -- has the highest (or tied for highest) rank on this node
+                        local blizzRankText = button.SpendText
+                            or button.PointSpendText
+                            or button.RankText
+                        if not blizzRankText then
+                            -- Walk children to find the rank font string
+                            for _, region in ipairs({ button:GetRegions() }) do
+                                if region:IsObjectType("FontString") then
+                                    local text = region:GetText()
+                                    if text and text:match("^%d+$") then
+                                        blizzRankText = region
+                                        break
+                                    end
+                                end
+                            end
+                        end
+                        if blizzRankText and currentCharRank > 0 and currentCharRank >= highestRank then
+                            -- Legendary orange — current char is the best (or tied)
+                            blizzRankText:SetTextColor(1.0, 0.5, 0.0, 1)
+                            button.pkRecoloredRank = true
+                        elseif button.pkRecoloredRank and blizzRankText then
+                            -- Reset to default green
+                            blizzRankText:SetTextColor(0.1, 1.0, 0.1, 1)
+                            button.pkRecoloredRank = false
+                        end
+
+                        -- Only show blue rank overlay for partial (blue) nodes
                         if bestState == "blue" then
                             -- Create outlined blue rank number below the existing green number
                             if not button.pkRankText then
@@ -1526,7 +1558,7 @@ function PK:UpdateSpecTreeHighlights()
                                 button.pkRankShadows = {}
                                 for _, off in ipairs(offsets) do
                                     local shadow = button:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-                                    shadow:SetPoint("CENTER", button, "CENTER", off[1], -34 + off[2])
+                                    shadow:SetPoint("CENTER", button, "CENTER", off[1], -37 + off[2])
                                     shadow:SetTextColor(0, 0, 0, 1)
                                     table.insert(button.pkRankShadows, shadow)
                                 end
@@ -1534,13 +1566,13 @@ function PK:UpdateSpecTreeHighlights()
                                 local diags = { {-1,-1}, {1,-1}, {-1,1}, {1,1} }
                                 for _, off in ipairs(diags) do
                                     local shadow = button:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-                                    shadow:SetPoint("CENTER", button, "CENTER", off[1], -34 + off[2])
+                                    shadow:SetPoint("CENTER", button, "CENTER", off[1], -37 + off[2])
                                     shadow:SetTextColor(0, 0, 0, 1)
                                     table.insert(button.pkRankShadows, shadow)
                                 end
                                 -- Main blue text on top
                                 local rankText = button:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-                                rankText:SetPoint("CENTER", button, "CENTER", 0, -34)
+                                rankText:SetPoint("CENTER", button, "CENTER", 0, -37)
                                 button.pkRankText = rankText
                             end
                             local label = tostring(highestRank)
@@ -1613,7 +1645,7 @@ function PK:UpdateSpecTreeHighlights()
                         end
 
                     else
-                        -- No alt data — hide any previous overlay
+                        -- No alt data — hide any previous overlay and reset colors
                         if button.pkHighlight then
                             button.pkHighlight:Hide()
                         end
@@ -1622,6 +1654,13 @@ function PK:UpdateSpecTreeHighlights()
                             for _, shadow in ipairs(button.pkRankShadows) do
                                 shadow:Hide()
                             end
+                        end
+                        if button.pkRecoloredRank then
+                            local blizzRankText = button.SpendText or button.PointSpendText or button.RankText
+                            if blizzRankText then
+                                blizzRankText:SetTextColor(0.1, 1.0, 0.1, 1)
+                            end
+                            button.pkRecoloredRank = false
                         end
                         button.pkAltData = nil
                     end
