@@ -426,6 +426,101 @@ function PK:ExportAllData()
         add("")
     end
 
+    -- Guild roster data
+    local guildChars = self:GetAllGuildCharacters()
+    local localKeys = {}
+    for _, c in ipairs(chars) do localKeys[c.charKey] = true end
+
+    local guildEntries = {}
+    for _, gc in ipairs(guildChars) do
+        if not localKeys[gc.charKey] and not gc.isLocal then
+            table.insert(guildEntries, gc)
+        end
+    end
+
+    if #guildEntries > 0 then
+        add("=== Guild Members (" .. #guildEntries .. ") ===")
+        add("")
+
+        for _, gc in ipairs(guildEntries) do
+            local displayName = gc.charKey
+            local className = gc.className or "UNKNOWN"
+            local level = gc.level or 0
+
+            add("--- " .. displayName .. " (Guild) ---")
+            add("  Class: " .. className .. "  Level: " .. level)
+
+            local profKeys = {}
+            for skillLineID, profData in pairs(gc.professions or {}) do
+                if not self:IsEmptyProfession(profData) then
+                    table.insert(profKeys, skillLineID)
+                end
+            end
+            table.sort(profKeys, function(a, b)
+                return (orderMap[a] or 999) < (orderMap[b] or 999)
+            end)
+
+            if #profKeys == 0 then
+                add("  (no professions)")
+            end
+
+            for _, skillLineID in ipairs(profKeys) do
+                local profData = gc.professions[skillLineID]
+                local profInfo = PK.ProfessionData[skillLineID]
+                local profName = (profInfo and profInfo.name) or profData.name or tostring(skillLineID)
+
+                local skillStr = ""
+                if profData.skillLevel and profData.maxSkillLevel then
+                    skillStr = "  [" .. profData.skillLevel .. "/" .. profData.maxSkillLevel .. "]"
+                end
+
+                if profData.hasSpec == false then
+                    add("  " .. profName .. skillStr)
+                else
+                    local spent = profData.totalKnowledgeSpent or 0
+                    local unspent = profData.unspentKnowledge or 0
+                    add("  " .. profName .. skillStr ..
+                        "  Knowledge: " .. spent .. " spent, " .. unspent .. " unspent")
+
+                    if profData.tabs and next(profData.tabs) then
+                        local sortedTabs = {}
+                        for tabID, tabData in pairs(profData.tabs) do
+                            table.insert(sortedTabs, { id = tabID, data = tabData })
+                        end
+                        table.sort(sortedTabs, function(a, b)
+                            return (a.data.name or "") < (b.data.name or "")
+                        end)
+
+                        for _, tabEntry in ipairs(sortedTabs) do
+                            local tabData = tabEntry.data
+                            local tabName = tabData.name or ("Tab " .. tabEntry.id)
+                            local tSpent = tabData.pointsSpent or 0
+                            local tMax = tabData.maxPoints or 0
+                            add("    [" .. tabName .. "]  " .. tSpent .. "/" .. tMax)
+
+                            if tabData.nodes then
+                                for _, node in ipairs(tabData.nodes) do
+                                    if node.currentRank and node.currentRank > 0 then
+                                        local status = ""
+                                        if node.currentRank >= node.maxRanks then
+                                            status = " (MAX)"
+                                        end
+                                        add("      " .. (node.name or "?") ..
+                                            "  " .. node.currentRank .. "/" .. node.maxRanks .. status)
+                                    end
+                                end
+                            end
+                        end
+                    else
+                        add("    (no tree data)")
+                    end
+                end
+            end
+
+            add("")
+        end
+    end
+
     add("=== End Export ===")
     return table.concat(lines, "\n")
 end

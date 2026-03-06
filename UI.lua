@@ -1425,7 +1425,7 @@ function PK:BuildAltNodeLookup(baseSkillLineID, filterVariantID)
                 for _, tabData in pairs(profData.tabs) do
                     if tabData.nodes then
                         for _, node in ipairs(tabData.nodes) do
-                            if node.name and node.currentRank ~= nil then
+                            if node.name and node.currentRank and node.currentRank > 0 then
                                 local key = node.name:lower()
                                 if not lookup[key] then
                                     lookup[key] = {}
