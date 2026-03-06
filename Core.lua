@@ -560,9 +560,15 @@ local function SetupProfessionUI()
         PK:SetupSpecTreeOverlay()
     end
 
-    -- Add PK button directly to the ProfessionsFrame title bar
-    if PK.CreateProfessionFrameButton then
-        PK:CreateProfessionFrameButton()
+end
+
+local function SetupProfessionsBookButton()
+    if PK.profBookButtonReady then return end
+    if not ProfessionsBookFrame then return end
+
+    PK.profBookButtonReady = true
+    if PK.CreateProfessionsBookButton then
+        PK:CreateProfessionsBookButton()
     end
 end
 
@@ -609,9 +615,20 @@ f:SetScript("OnEvent", function(_, event, name)
             C_Timer.After(1, SetupProfessionUI)
         elseif name == "Blizzard_PlayerSpells" then
             C_Timer.After(1, SetupProfessionButton)
+        elseif name == "Blizzard_ProfessionsBook" or name == "Blizzard_ProfessionBook" then
+            C_Timer.After(1, SetupProfessionsBookButton)
+        end
+
+        -- Fallback: try to attach PK button whenever any profession addon loads
+        if ProfessionsBookFrame and not PK.profBookButtonReady then
+            C_Timer.After(1, SetupProfessionsBookButton)
         end
 
     elseif event == "TRADE_SKILL_SHOW" then
+        -- Also try ProfessionsBookFrame button here as a fallback
+        if not PK.profBookButtonReady then
+            SetupProfessionsBookButton()
+        end
         -- Profession window opened -- best time to scan
         C_Timer.After(0.5, function()
             PK:DeepScanCurrentProfession()

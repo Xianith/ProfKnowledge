@@ -308,7 +308,7 @@ function PK:CreateSummaryWindow()
         GameTooltip:AddLine("|cff00ccffGuild Sync|r")
         if PK.commReady then
             GameTooltip:AddLine("Click to force sync with guild", 1, 1, 1, true)
-            local count = PK:GetAddonUserCount and PK:GetAddonUserCount() or 0
+            local count = PK.GetAddonUserCount and PK:GetAddonUserCount() or 0
             if count > 0 then
                 GameTooltip:AddLine(" ")
                 GameTooltip:AddLine("Online addon users:", 0.7, 0.7, 0.7)
@@ -1666,41 +1666,98 @@ function PK:CreateProfessionButton()
     PK:Debug("PK button added to professions overview pane")
 end
 
---- Button on ProfessionsFrame (the crafting/spec window itself)
-function PK:CreateProfessionFrameButton()
-    local profFrame = ProfessionsFrame
-    if not profFrame then return end
-    if profFrame.pkButton then return end  -- already created
+--- Tab on ProfessionsBookFrame (matching Recipes / Specializations tab style)
+function PK:CreateProfessionsBookButton()
+    local bookFrame = ProfessionsBookFrame
+    if not bookFrame then return end
+    if bookFrame.pkTab then return end  -- already created
 
-    local btn = CreateFrame("Button", nil, profFrame, "UIPanelButtonTemplate")
-    btn:SetSize(60, 20)
-    btn:SetText("|cff00ccffPK|r")
-    btn:SetFrameStrata("HIGH")
+    -- Create a tab button styled like the Blizzard profession tabs
+    local tab = CreateFrame("Button", "ProfKnowledgeTab", bookFrame)
+    tab:SetSize(80, 32)
+    tab:SetFrameStrata("HIGH")
 
-    -- Try to anchor near the close button at the top-right
-    local closeBtn = profFrame.CloseButton or profFrame.ClosePanelButton
-    if closeBtn then
-        btn:SetPoint("RIGHT", closeBtn, "LEFT", -4, 0)
-    else
-        btn:SetPoint("TOPRIGHT", profFrame, "TOPRIGHT", -60, -6)
+    -- Tab background textures (mimic the Blizzard bottom-tab look)
+    -- Left cap
+    local leftTex = tab:CreateTexture(nil, "BACKGROUND")
+    leftTex:SetTexture("Interface\\PaperDollInfoFrame\\UI-Character-ActiveTab")
+    leftTex:SetTexCoord(0, 0.15625, 0, 1)
+    leftTex:SetSize(12, 45)
+    leftTex:SetPoint("TOPLEFT", 0, 0)
+    tab.leftTex = leftTex
+
+    -- Center stretch
+    local midTex = tab:CreateTexture(nil, "BACKGROUND")
+    midTex:SetTexture("Interface\\PaperDollInfoFrame\\UI-Character-ActiveTab")
+    midTex:SetTexCoord(0.15625, 0.84375, 0, 1)
+    midTex:SetPoint("LEFT", leftTex, "RIGHT", 0, 0)
+    midTex:SetPoint("RIGHT", tab, "RIGHT", -12, 0)
+    midTex:SetHeight(45)
+    tab.midTex = midTex
+
+    -- Right cap
+    local rightTex = tab:CreateTexture(nil, "BACKGROUND")
+    rightTex:SetTexture("Interface\\PaperDollInfoFrame\\UI-Character-ActiveTab")
+    rightTex:SetTexCoord(0.84375, 1, 0, 1)
+    rightTex:SetSize(12, 45)
+    rightTex:SetPoint("TOPRIGHT", 0, 0)
+    tab.rightTex = rightTex
+
+    -- Tab label text
+    local label = tab:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    label:SetPoint("CENTER", 0, 2)
+    label:SetText("|cff00ccffPK|r")
+    tab.label = label
+
+    -- Highlight on hover
+    local highlight = tab:CreateTexture(nil, "HIGHLIGHT")
+    highlight:SetTexture("Interface\\PaperDollInfoFrame\\UI-Character-Tab-Highlight")
+    highlight:SetTexCoord(0.15625, 0.84375, 0, 1)
+    highlight:SetPoint("TOPLEFT", 12, 0)
+    highlight:SetPoint("BOTTOMRIGHT", -12, 0)
+    highlight:SetBlendMode("ADD")
+    highlight:SetAlpha(0.4)
+
+    -- Position: bottom of the book frame, next to existing tabs
+    -- Find the last existing tab at the bottom to anchor after it
+    local anchored = false
+    -- Try common tab children of ProfessionsBookFrame
+    local children = { bookFrame:GetChildren() }
+    local rightmostTab = nil
+    local rightmostX = -9999
+    for _, child in ipairs(children) do
+        -- Look for tab-like buttons at the bottom of the frame
+        if child ~= tab and child.GetText and child:IsShown() then
+            local _, _, _, x = child:GetPoint()
+            if x and x > rightmostX then
+                rightmostX = x
+                rightmostTab = child
+            end
+        end
     end
 
-    btn:SetScript("OnClick", function()
-        PK:ShowSummaryWindowAnchored(profFrame)
+    -- Anchor at the bottom-left of the book frame (tabs extend below the frame)
+    tab:SetPoint("BOTTOMLEFT", bookFrame, "BOTTOMLEFT", 4, -30)
+    tab.defaultAnchor = true
+
+    -- Click handler
+    tab:SetScript("OnClick", function()
+        PK:ShowSummaryWindowAnchored(bookFrame)
     end)
 
-    btn:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+    -- Tooltip
+    tab:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
         GameTooltip:AddLine("|cff00ccffProfKnowledge|r")
         GameTooltip:AddLine("View profession knowledge across all characters", 1, 1, 1, true)
         GameTooltip:Show()
     end)
-    btn:SetScript("OnLeave", function()
+    tab:SetScript("OnLeave", function()
         GameTooltip:Hide()
     end)
 
-    profFrame.pkButton = btn
-    PK:Debug("PK button added to ProfessionsFrame")
+    bookFrame.pkTab = tab
+    PK:Debug("PK tab added to ProfessionsBookFrame")
 end
 
 function PK:ShowSummaryWindowAnchored(anchorFrame)
