@@ -1330,9 +1330,8 @@ function PK:BuildAltNodeLookup(baseSkillLineID, filterVariantID)
     local lookup = {}
     if not self.db or not self.db.characters then return lookup end
 
-    local currentKey = self.charKey
     for charKey, charData in pairs(self.db.characters) do
-        if charKey ~= currentKey then
+        do
             local profData = charData.professions and charData.professions[baseSkillLineID]
             if profData and profData.tabs then
                 -- Only include data from matching expansion variant (e.g. Midnight vs TWW).
