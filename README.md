@@ -1,5 +1,7 @@
 # ProfKnowledge
 
+[Download on CurseForge](https://www.curseforge.com/wow/addons/profknowledge)
+
 A World of Warcraft (Retail) addon that tracks **profession knowledge** across all characters on your account and automatically **syncs data with guild members** who also have the addon installed.
 
 ## Features
