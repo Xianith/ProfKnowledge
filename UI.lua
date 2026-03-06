@@ -1733,22 +1733,27 @@ function PK:CreateProfessionsBookButton()
     tab:SetPoint("BOTTOMLEFT", bookFrame, "BOTTOMLEFT", 4, -30)
     tab.defaultAnchor = true
 
-    -- Helper to swap between active / inactive tab textures
-    local TAB_H = 45
+    -- Helper to swap between active / inactive visual states
+    local TAB_TEX = "Interface\\PaperDollInfoFrame\\UI-Character-ActiveTab"
     local function SetTabActive(active)
-        local tex = active
-            and "Interface\\PaperDollInfoFrame\\UI-Character-ActiveTab"
-            or  "Interface\\PaperDollInfoFrame\\UI-Character-InActiveTab"
-        leftTex:SetTexture(tex)
-        leftTex:SetHeight(TAB_H)
-        midTex:SetTexture(tex)
-        midTex:SetHeight(TAB_H)
-        rightTex:SetTexture(tex)
-        rightTex:SetHeight(TAB_H)
         if active then
+            -- Bright, fully saturated active tab
+            leftTex:SetVertexColor(1, 1, 1)
+            midTex:SetVertexColor(1, 1, 1)
+            rightTex:SetVertexColor(1, 1, 1)
+            leftTex:SetDesaturated(false)
+            midTex:SetDesaturated(false)
+            rightTex:SetDesaturated(false)
             label:SetFontObject("GameFontNormalSmall")
             label:SetText("|cff00ccffPK|r")
         else
+            -- Dimmed, desaturated inactive tab
+            leftTex:SetDesaturated(true)
+            midTex:SetDesaturated(true)
+            rightTex:SetDesaturated(true)
+            leftTex:SetVertexColor(0.6, 0.6, 0.6)
+            midTex:SetVertexColor(0.6, 0.6, 0.6)
+            rightTex:SetVertexColor(0.6, 0.6, 0.6)
             label:SetFontObject("GameFontDisableSmall")
             label:SetText("|cff88bbddPK|r")
         end
