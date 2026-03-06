@@ -1496,17 +1496,42 @@ function PK:UpdateSpecTreeHighlights()
                     local altData = cachedAltNodeData[nodeName:lower()]
 
                     if altData and #altData > 0 then
-                        -- ---- circular green highlight ----
+                        -- Determine best state across all alts for this node
+                        -- epic (purple) = fully maxed, rare (blue) = some points, common (green) = bought (0 extra)
+                        local bestState = "green"  -- default: bought
+                        for _, alt in ipairs(altData) do
+                            local dMax = alt.maxRanks or 0
+                            local dRank = alt.rank or 0
+                            if dMax % 5 ~= 0 then
+                                dMax = dMax - 1
+                                dRank = math.max(dRank - 1, 0)
+                            end
+                            if dRank >= dMax and dMax > 0 then
+                                bestState = "purple"; break  -- can't do better
+                            elseif dRank > 0 then
+                                bestState = "blue"
+                            end
+                        end
+                        local r, g, b, a
+                        if bestState == "purple" then
+                            r, g, b, a = 0.64, 0.21, 0.93, 0.35  -- epic purple
+                        elseif bestState == "blue" then
+                            r, g, b, a = 0.0, 0.44, 0.87, 0.35   -- rare blue
+                        else
+                            r, g, b, a = 0.12, 0.75, 0.12, 0.30   -- common green
+                        end
+
+                        -- ---- circular highlight (sized 5% smaller) ----
                         if not button.pkHighlight then
                             local glow = button:CreateTexture(nil, "OVERLAY", nil, 7)
                             glow:SetPoint("CENTER", 0, 0)
-                            local size = math.min(button:GetWidth(), button:GetHeight())
+                            local size = math.min(button:GetWidth(), button:GetHeight()) * 0.95
                             glow:SetSize(size, size)
                             glow:SetTexture("Interface\\CHARACTERFRAME\\TempPortraitAlphaMask")
-                            glow:SetVertexColor(0, 1, 0, 0.3)
                             glow:SetBlendMode("ADD")
                             button.pkHighlight = glow
                         end
+                        button.pkHighlight:SetVertexColor(r, g, b, a)
                         button.pkHighlight:Show()
 
                         -- Store lookup data on the button for the tooltip
