@@ -1558,12 +1558,34 @@ function PK:UpdateSpecTreeHighlights()
                             end
                         end
 
-                        -- Only show blue rank overlay for partial (blue) nodes
+                        -- ── Color circle overlay (all three states) ──
+                        local cr, cg, cb, ca
+                        if bestState == "purple" then
+                            cr, cg, cb, ca = 0.64, 0.21, 0.93, 0.35
+                        elseif bestState == "blue" then
+                            cr, cg, cb, ca = 0.0, 0.44, 0.87, 0.35
+                        else
+                            cr, cg, cb, ca = 0.12, 0.75, 0.12, 0.30
+                        end
+                        if not button.pkHighlight then
+                            local glow = button:CreateTexture(nil, "OVERLAY", nil, 7)
+                            glow:SetPoint("CENTER", 0, 0)
+                            local size = math.min(button:GetWidth(), button:GetHeight()) * 0.95
+                            glow:SetSize(size, size)
+                            glow:SetTexture("Interface\\CHARACTERFRAME\\TempPortraitAlphaMask")
+                            glow:SetBlendMode("ADD")
+                            button.pkHighlight = glow
+                        end
+                        button.pkHighlight:SetVertexColor(cr, cg, cb, ca)
+                        button.pkHighlight:Show()
+
+                        -- ── Blue rank number (only for partial/blue nodes) ──
                         if bestState == "blue" then
-                            -- Create outlined blue rank number below the existing green number
                             if not button.pkRankText then
-                                -- Black outline using 4 offset shadow copies
-                                local offsets = { {-1,0}, {1,0}, {0,-1}, {0,1} }
+                                local offsets = {
+                                    {-1,0}, {1,0}, {0,-1}, {0,1},
+                                    {-1,-1}, {1,-1}, {-1,1}, {1,1},
+                                }
                                 button.pkRankShadows = {}
                                 for _, off in ipairs(offsets) do
                                     local shadow = button:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -1571,15 +1593,6 @@ function PK:UpdateSpecTreeHighlights()
                                     shadow:SetTextColor(0, 0, 0, 1)
                                     table.insert(button.pkRankShadows, shadow)
                                 end
-                                -- Diagonal shadows for thicker outline
-                                local diags = { {-1,-1}, {1,-1}, {-1,1}, {1,1} }
-                                for _, off in ipairs(diags) do
-                                    local shadow = button:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-                                    shadow:SetPoint("CENTER", button, "CENTER", off[1], -37 + off[2])
-                                    shadow:SetTextColor(0, 0, 0, 1)
-                                    table.insert(button.pkRankShadows, shadow)
-                                end
-                                -- Main blue text on top
                                 local rankText = button:CreateFontString(nil, "OVERLAY", "GameFontNormal")
                                 rankText:SetPoint("CENTER", button, "CENTER", 0, -37)
                                 button.pkRankText = rankText
@@ -1593,18 +1606,12 @@ function PK:UpdateSpecTreeHighlights()
                                 shadow:Show()
                             end
                         else
-                            -- Purple or green: hide rank text if it was previously created
                             if button.pkRankText then
                                 button.pkRankText:Hide()
                                 for _, shadow in ipairs(button.pkRankShadows) do
                                     shadow:Hide()
                                 end
                             end
-                        end
-
-                        -- Hide old circle highlight if it exists from previous version
-                        if button.pkHighlight then
-                            button.pkHighlight:Hide()
                         end
 
                         -- Store lookup data on the button for the tooltip
