@@ -1,3 +1,25 @@
+## v0.1.9 — Guild Sync & Spec Overlay Improvements
+
+### Guild Sync
+- Fixed guild synced characters not appearing in the summary window
+- Guild sync now includes node-level data for specialization tree overlays
+- Guild members' spec tree progress visible on overlay and tooltips
+- Improved profession key matching for guild roster (handles base/variant ID mismatches)
+
+### Spec Tree Overlay
+- Current character no longer shown in the Alt Knowledge overlay (only alts/guildies)
+- "Alt Knowledge" tooltip section hidden when no other characters have data for a node
+- Fixed overlay incorrectly highlighting all unbought nodes as purchased
+
+### Export
+- Export now includes guild member data alongside local characters
+
+### Bug Fixes
+- Fixed "Character not found" errors when clicking guild member cells
+- Fixed detail panel and tooltips not loading guild member profession data
+
+---
+
 ## v0.1.1 — Guild Sync Display Fix
 
 ### Bug Fix
