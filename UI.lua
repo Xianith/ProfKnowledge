@@ -151,7 +151,8 @@ function PK:ShowSummaryWindow()
 end
 
 function PK:CreateSummaryWindow()
-    local frame = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
+    -- ── Portrait-style frame (like ProfessionsBookFrame) ──
+    local frame = CreateFrame("Frame", "ProfKnowledgeSummaryFrame", UIParent, "ButtonFrameTemplate")
     frame:SetSize(660, 450)
     frame:SetPoint("CENTER")
     frame:SetMovable(true)
@@ -162,45 +163,53 @@ function PK:CreateSummaryWindow()
     frame:SetFrameStrata("DIALOG")
     frame:SetClampedToScreen(true)
 
-    frame:SetBackdrop({
-        bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
-        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-        tile     = true,
-        tileSize = 32,
-        edgeSize = 32,
-        insets   = { left = 8, right = 8, top = 8, bottom = 8 },
-    })
+    -- Portrait: blacksmith icon
+    if frame.PortraitContainer and frame.PortraitContainer.portrait then
+        frame.PortraitContainer.portrait:SetTexture("Interface\\Icons\\ui_profession_blacksmithing")
+    elseif frame.portrait then
+        SetPortraitToTexture(frame.portrait, "Interface\\Icons\\ui_profession_blacksmithing")
+    end
 
-    -- Title
-    local title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    title:SetPoint("TOP", 0, -16)
-    title:SetText("|cff00ccffProf|r|cffffffffKnowledge|r")
-    frame.title = title
+    -- Title (provided by ButtonFrameTemplate)
+    frame:SetTitle("|cff00ccffProf|r|cffffffffKnowledge|r")
 
-    -- Subtitle
+    -- Hide the bottom button bar (we use our own sync bar + import/export)
+    ButtonFrameTemplate_HideButtonBar(frame)
+
+    -- Adjust the Inset to leave room for sync bar + import/export at the bottom
+    frame.Inset:ClearAllPoints()
+    frame.Inset:SetPoint("TOPLEFT", frame, "TOPLEFT", 4, -60)
+    frame.Inset:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -6, 56)
+
+    -- Book/parchment background texture inside the Inset
+    local bookBg = frame.Inset:CreateTexture(nil, "BACKGROUND", nil, 1)
+    bookBg:SetAllPoints()
+    bookBg:SetTexture("Interface\\QuestFrame\\QuestBG")
+    bookBg:SetTexCoord(0, 1, 0.02, 1)
+    frame.bookBg = bookBg
+
+    -- Subtitle (character count) — inside the Inset
     local subtitle = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    subtitle:SetPoint("TOP", title, "BOTTOM", 0, -2)
+    subtitle:SetPoint("TOPLEFT", frame.Inset, "TOPLEFT", 8, -4)
     subtitle:SetTextColor(0.6, 0.6, 0.6)
     frame.subtitle = subtitle
 
     -- Hint text
     local hint = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    hint:SetPoint("TOP", subtitle, "BOTTOM", 0, -1)
+    hint:SetPoint("LEFT", subtitle, "RIGHT", 10, 0)
     hint:SetTextColor(0.45, 0.45, 0.45)
-    hint:SetText("Click a cell to see knowledge tree details")
+    hint:SetText("Click a cell for details")
     frame.hint = hint
 
-    -- Close button
-    local closeBtn = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
-    closeBtn:SetPoint("TOPRIGHT", -4, -4)
+    -- ESC to close (standard WoW mechanism)
+    tinsert(UISpecialFrames, "ProfKnowledgeSummaryFrame")
 
     -- ── Filter row: Profession dropdown ──
 
     frame.selectedProfession = nil   -- nil = "All Professions"
 
-    -- Profession label + dropdown
     local profLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    profLabel:SetPoint("TOPLEFT", 20, -56)
+    profLabel:SetPoint("TOPLEFT", frame.Inset, "TOPLEFT", 8, -18)
     profLabel:SetTextColor(0.7, 0.7, 0.7)
     profLabel:SetText("Profession:")
 
@@ -239,17 +248,17 @@ function PK:CreateSummaryWindow()
     end)
     UIDropDownMenu_SetText(profDropdown, "All Professions")
 
-    -- Column headers area (positioned below dropdowns)
-    local headerFrame = CreateFrame("Frame", nil, frame)
-    headerFrame:SetPoint("TOPLEFT", 16, -84)
-    headerFrame:SetPoint("TOPRIGHT", -16, -84)
+    -- Column headers area (inside the Inset, below dropdown)
+    local headerFrame = CreateFrame("Frame", nil, frame.Inset)
+    headerFrame:SetPoint("TOPLEFT", frame.Inset, "TOPLEFT", 4, -42)
+    headerFrame:SetPoint("TOPRIGHT", frame.Inset, "TOPRIGHT", -4, -42)
     headerFrame:SetHeight(24)
     frame.headerFrame = headerFrame
 
-    -- Scroll frame for grid rows
-    local scrollFrame = CreateFrame("ScrollFrame", nil, frame, "UIPanelScrollFrameTemplate")
-    scrollFrame:SetPoint("TOPLEFT", 16, -110)
-    scrollFrame:SetPoint("BOTTOMRIGHT", -36, 64)
+    -- Scroll frame for grid rows (inside the Inset)
+    local scrollFrame = CreateFrame("ScrollFrame", nil, frame.Inset, "UIPanelScrollFrameTemplate")
+    scrollFrame:SetPoint("TOPLEFT", frame.Inset, "TOPLEFT", 4, -66)
+    scrollFrame:SetPoint("BOTTOMRIGHT", frame.Inset, "BOTTOMRIGHT", -24, 4)
     frame.scrollFrame = scrollFrame
 
     local scrollChild = CreateFrame("Frame", nil, scrollFrame)
@@ -257,21 +266,11 @@ function PK:CreateSummaryWindow()
     scrollFrame:SetScrollChild(scrollChild)
     frame.scrollChild = scrollChild
 
-    -- ESC to close
-    frame:SetScript("OnKeyDown", function(self, key)
-        if key == "ESCAPE" then
-            self:SetPropagateKeyboardInput(false)
-            self:Hide()
-        else
-            self:SetPropagateKeyboardInput(true)
-        end
-    end)
-
-    -- ── Sync status bar ──
+    -- ── Sync status bar (very bottom of the frame) ──
     local syncBar = CreateFrame("Button", nil, frame)
     syncBar:SetHeight(22)
-    syncBar:SetPoint("BOTTOMLEFT", 16, 38)
-    syncBar:SetPoint("BOTTOMRIGHT", -16, 38)
+    syncBar:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 8, 6)
+    syncBar:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -8, 6)
     frame.syncBar = syncBar
 
     -- Sync bar background
@@ -340,10 +339,10 @@ function PK:CreateSummaryWindow()
         GameTooltip:Hide()
     end)
 
-    -- Bottom button bar: Import / Export (below sync bar)
+    -- Import / Export buttons (above sync bar)
     local exportBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     exportBtn:SetSize(80, 22)
-    exportBtn:SetPoint("BOTTOMRIGHT", -16, 12)
+    exportBtn:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -12, 30)
     exportBtn:SetText("Export")
     exportBtn:SetScript("OnClick", function()
         PK:ShowExportWindow()
