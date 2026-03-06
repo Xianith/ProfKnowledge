@@ -379,19 +379,25 @@ end
 ----------------------------------------------------------------------
 
 --- HELLO handler: a guild member announced their presence.
+local HELLO_COOLDOWN = 30  -- don't reply to HELLO more than once per 30s
+local lastHelloReply = 0
 local function OnHello(self, sender, payload, distribution)
     self.addonUsers[sender] = time()
     self:ElectRoles()
 
-    -- Reply with our own HELLO (with jitter to avoid thundering herd)
-    local jitter = 0.5 + math.random() * 3.5
-    C_Timer.After(jitter, function()
-        if PK.commReady then
-            PK:SendGuildMessage(PK.MSG_HELLO, {
-                charKey = PK.charKey,
-            })
-        end
-    end)
+    -- Reply with our own HELLO, but only if we haven't recently (avoid ping-pong)
+    local now = time()
+    if (now - lastHelloReply) >= HELLO_COOLDOWN then
+        lastHelloReply = now
+        local jitter = 0.5 + math.random() * 3.5
+        C_Timer.After(jitter, function()
+            if PK.commReady then
+                PK:SendGuildMessage(PK.MSG_HELLO, {
+                    charKey = PK.charKey,
+                })
+            end
+        end)
+    end
 end
 
 --- HEARTBEAT handler: DR is alive.
