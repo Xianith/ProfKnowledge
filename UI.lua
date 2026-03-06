@@ -494,9 +494,27 @@ function PK:RefreshSummaryWindow()
         chars = filtered
     end
 
+    local localCount = #chars
+
+    -- Merge guild roster entries (non-local only, to avoid duplicates)
+    local guildChars = self:GetAllGuildCharacters(filterProfession)
+    local localKeys = {}
+    for _, c in ipairs(chars) do localKeys[c.charKey] = true end
+    local guildCount = 0
+    for _, gc in ipairs(guildChars) do
+        if not localKeys[gc.charKey] and not gc.isLocal then
+            gc.isGuild = true
+            table.insert(chars, gc)
+            guildCount = guildCount + 1
+        end
+    end
+
     local charCount = #chars
 
-    local subtitleText = charCount .. " character(s)"
+    local subtitleText = localCount .. " local"
+    if guildCount > 0 then
+        subtitleText = subtitleText .. ", " .. guildCount .. " guild"
+    end
     if filterProfession then
         local profInfo = PK.ProfessionData[filterProfession]
         local profName = profInfo and profInfo.name or "?"
@@ -592,6 +610,7 @@ function PK:RefreshSummaryWindow()
     for rowIdx, char in ipairs(chars) do
         local classColor = PK.ClassColors[char.className] or "|cffffffff"
         local isCurrentChar = (char.charKey == self.charKey)
+        local isGuild = char.isGuild
 
         -- Character name
         local nameText = scrollChild:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -599,9 +618,14 @@ function PK:RefreshSummaryWindow()
         nameText:SetWidth(NAME_COL_WIDTH)
         nameText:SetJustifyH("LEFT")
         local displayName = char.charKey:match("^(.-)%-") or char.charKey
-        local nameStr = classColor .. displayName .. "|r"
-        if isCurrentChar then
-            nameStr = nameStr .. " |cff888888*|r"
+        local nameStr
+        if isGuild then
+            nameStr = "|cff999999" .. displayName .. "|r |cff666666(G)|r"
+        else
+            nameStr = classColor .. displayName .. "|r"
+            if isCurrentChar then
+                nameStr = nameStr .. " |cff888888*|r"
+            end
         end
         nameText:SetText(nameStr)
         table.insert(scrollChild.children, nameText)
@@ -658,8 +682,8 @@ function PK:RefreshSummaryWindow()
             FormatProfCell(fishData, false), char.charKey, FISHING_ID, fishData)
         xPos = xPos + SEC_COL_WIDTH
 
-        -- Delete (X) button — don't show for current character
-        if not isCurrentChar then
+        -- Delete (X) button — don't show for current character or guild members
+        if not isCurrentChar and not isGuild then
             local delBtn = CreateFrame("Button", nil, scrollChild)
             delBtn:SetPoint("TOPLEFT", xPos, yOffset)
             delBtn:SetSize(DEL_COL_WIDTH, ROW_HEIGHT)
