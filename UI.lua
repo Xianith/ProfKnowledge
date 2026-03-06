@@ -176,12 +176,14 @@ function PK:CreateSummaryWindow()
     frame.selectedProfession = nil   -- nil = "All Professions"
 
     local profLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    profLabel:SetPoint("RIGHT", frame.TitleContainer or frame, "RIGHT", -40, 0)
+    profLabel:SetPoint("LEFT", frame, "TOPLEFT", 64, -38)
     profLabel:SetTextColor(0.7, 0.7, 0.7)
     profLabel:SetText("Filter:")
 
     local profDropdown = CreateFrame("Frame", nil, frame, "UIDropDownMenuTemplate")
     profDropdown:SetPoint("LEFT", profLabel, "RIGHT", -12, -2)
+    profDropdown:SetFrameStrata("DIALOG")
+    profDropdown:SetFrameLevel(frame:GetFrameLevel() + 10)
     UIDropDownMenu_SetWidth(profDropdown, 120)
     frame.professionDropdown = profDropdown
 
@@ -220,12 +222,12 @@ function PK:CreateSummaryWindow()
     frame.Inset:SetPoint("TOPLEFT", frame, "TOPLEFT", 4, -60)
     frame.Inset:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -6, 30)
 
-    -- Book/parchment background texture inside the Inset
-    local bookBg = frame.Inset:CreateTexture(nil, "BACKGROUND", nil, 1)
-    bookBg:SetAllPoints()
-    bookBg:SetTexture("Interface\\QuestFrame\\QuestBG")
-    bookBg:SetTexCoord(0, 1, 0.02, 1)
-    frame.bookBg = bookBg
+    -- -- Book/parchment background texture inside the Inset
+    -- local bookBg = frame.Inset:CreateTexture(nil, "BACKGROUND", nil, 1)
+    -- bookBg:SetAllPoints()
+    -- bookBg:SetTexture("Interface\\QuestFrame\\QuestBG")
+    -- bookBg:SetTexCoord(0, 1, 0.02, 1)
+    -- frame.bookBg = bookBg
 
     -- Subtitle (character count) — inside the Inset
     local subtitle = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -268,10 +270,7 @@ function PK:CreateSummaryWindow()
     syncBar:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -8, 6)
     frame.syncBar = syncBar
 
-    -- Sync bar background
-    local syncBg = syncBar:CreateTexture(nil, "BACKGROUND")
-    syncBg:SetAllPoints()
-    syncBg:SetColorTexture(0.08, 0.15, 0.12, 0.8)
+    -- (no colored background — blends with the frame)
 
     -- Import / Export buttons (right side of sync bar)
     local exportBtn = CreateFrame("Button", nil, syncBar, "UIPanelButtonTemplate")
@@ -713,7 +712,7 @@ function PK:RefreshSummaryWindow()
     local legend = scrollChild:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     legend:SetPoint("TOPLEFT", 4, yOffset)
     legend:SetTextColor(0.5, 0.5, 0.5)
-    legend:SetText("|cff00ff00Green|r = spent  |cffffd700Gold|r = total (spent+unspent)  |cff888888*|r = current char  Click cell for details")
+    -- legend:SetText("|cff00ff00Green|r = spent  |cffffd700Gold|r = total (spent+unspent)  |cff888888*|r = current char  Click cell for details")
     table.insert(scrollChild.children, legend)
 
     yOffset = yOffset - ROW_HEIGHT
@@ -1760,9 +1759,9 @@ function PK:ShowSummaryWindowAnchored(anchorFrame)
     end
     self:RefreshSummaryWindow()
 
-    -- Anchor on top of the book frame (same position and size)
+    -- Anchor on top of the book frame (same position, 5px taller)
     summaryFrame:ClearAllPoints()
-    summaryFrame:SetPoint("TOPLEFT", anchorFrame, "TOPLEFT", 0, 0)
+    summaryFrame:SetPoint("TOPLEFT", anchorFrame, "TOPLEFT", 0, 5)
     summaryFrame:SetPoint("BOTTOMRIGHT", anchorFrame, "BOTTOMRIGHT", 0, 0)
     summaryFrame:Show()
 end
