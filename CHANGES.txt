@@ -1,3 +1,18 @@
+## v0.1.1 — Guild Sync Display Fix
+
+### Bug Fix
+- Fixed guild synced characters not appearing in the summary window
+  - Sync protocol was working correctly (HELLO, DELTA, SYNC_REQ/RESP all functional)
+  - Data was being stored in the guild roster but never displayed in the UI
+  - Summary window now merges guild roster entries alongside local characters
+
+### UI Changes
+- Guild members show with a dimmed name and (G) tag to distinguish from local characters
+- Subtitle now shows "X local, Y guild" character counts
+- Delete button hidden for guild-synced entries (managed by sync, not manually)
+
+---
+
 ## v0.1.0 — Initial Release
 
 ### Account-Wide Profession Tracking
