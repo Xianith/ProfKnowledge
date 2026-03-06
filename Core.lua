@@ -640,9 +640,6 @@ f:SetScript("OnEvent", function(_, event, name)
                     PK:UpdateSpecTreeHighlights()
                 end)
             end
-            -- Broadcast delta to guild after scan
-            PK:SeedOwnData()
-            PK:BroadcastDelta()
         end)
 
     elseif event == "TRADE_SKILL_LIST_UPDATE" then
@@ -657,9 +654,6 @@ f:SetScript("OnEvent", function(_, event, name)
                     PK:UpdateSpecTreeHighlights()
                 end)
             end
-            -- Broadcast delta to guild after scan
-            PK:SeedOwnData()
-            PK:BroadcastDelta()
         end)
 
     elseif event == "TRAIT_CONFIG_UPDATED" then
@@ -674,17 +668,12 @@ f:SetScript("OnEvent", function(_, event, name)
                     PK:UpdateSpecTreeHighlights()
                 end)
             end
-            -- Broadcast delta to guild after scan
-            PK:SeedOwnData()
-            PK:BroadcastDelta()
         end)
 
     elseif event == "SKILL_LINES_CHANGED" then
         -- Profession data loaded/changed
         C_Timer.After(2, function()
             PK:ScanAllProfessions()
-            PK:SeedOwnData()
-            PK:BroadcastDelta()
         end)
 
     elseif event == "GUILD_ROSTER_UPDATE" then
