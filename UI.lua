@@ -1223,30 +1223,55 @@ function PK:RefreshOverlay()
     end
 
     -- Merge guild roster characters (non-local, deduplicated)
-    local guildChars = self:GetGuildCharactersForProfession(skillLineID)
     local seen = {}
     for _, c in ipairs(chars) do seen[c.charKey] = true end
-    for _, gc in ipairs(guildChars) do
-        if not seen[gc.charKey] and not gc.isLocal then
-            table.insert(chars, gc)
-            seen[gc.charKey] = true
-        end
-    end
 
-    -- Also try guild roster with the variant ID as key (in case professions
-    -- were stored keyed by variant rather than base ID)
-    if currentVariantID and currentVariantID ~= skillLineID then
-        local guildVarChars = self:GetGuildCharactersForProfession(currentVariantID)
-        for _, gc in ipairs(guildVarChars) do
-            if not seen[gc.charKey] and not gc.isLocal then
-                table.insert(chars, gc)
-                seen[gc.charKey] = true
+    -- Search guild roster by base ID, variant ID, and scan all entries as fallback
+    local roster = self:GetGuildRoster()
+    if roster then
+        for charKey, entry in pairs(roster) do
+            if not seen[charKey] and not entry.isLocal and entry.professions then
+                -- Try to find the profession under any key that matches
+                local profData = entry.professions[skillLineID]
+                if not profData and currentVariantID then
+                    profData = entry.professions[currentVariantID]
+                end
+                -- Brute-force: check if any profession entry matches by base or variant
+                if not profData then
+                    for pid, pdata in pairs(entry.professions) do
+                        if pdata.baseSkillLineID == skillLineID
+                            or pdata.skillLineID == skillLineID
+                            or pdata.variantID == skillLineID
+                            or (currentVariantID and (pid == currentVariantID
+                                or pdata.variantID == currentVariantID
+                                or pdata.skillLineID == currentVariantID)) then
+                            profData = pdata
+                            break
+                        end
+                    end
+                end
+                if profData then
+                    table.insert(chars, {
+                        charKey   = charKey,
+                        className = entry.className,
+                        classID   = entry.classID,
+                        level     = entry.level,
+                        profData  = profData,
+                        isGuild   = true,
+                    })
+                    seen[charKey] = true
+                end
             end
         end
     end
 
     PK:Debug("RefreshOverlay: " .. #chars .. " chars for skillLine=" .. tostring(skillLineID)
         .. " variant=" .. tostring(currentVariantID))
+    if roster then
+        local rcount = 0
+        for _ in pairs(roster) do rcount = rcount + 1 end
+        PK:Debug("  Guild roster has " .. rcount .. " entries")
+    end
 
     -- Filter out characters with 0 points spent (skip current char from filter)
     local filtered = {}
