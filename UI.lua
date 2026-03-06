@@ -1733,6 +1733,28 @@ function PK:CreateProfessionsBookButton()
     tab:SetPoint("BOTTOMLEFT", bookFrame, "BOTTOMLEFT", 4, -30)
     tab.defaultAnchor = true
 
+    -- Helper to swap between active / inactive tab textures
+    local function SetTabActive(active)
+        local tex = active
+            and "Interface\\PaperDollInfoFrame\\UI-Character-ActiveTab"
+            or  "Interface\\PaperDollInfoFrame\\UI-Character-InActiveTab"
+        leftTex:SetTexture(tex)
+        midTex:SetTexture(tex)
+        rightTex:SetTexture(tex)
+        if active then
+            label:SetFontObject("GameFontNormalSmall")
+            label:SetText("|cff00ccffPK|r")
+        else
+            label:SetFontObject("GameFontDisableSmall")
+            label:SetText("|cff88bbddPK|r")
+        end
+        tab.isActive = active
+    end
+    tab.SetTabActive = SetTabActive
+
+    -- Start inactive
+    SetTabActive(false)
+
     -- Click handler (toggle)
     tab:SetScript("OnClick", function()
         PK:ToggleSummaryWindowAnchored(bookFrame)
@@ -1753,9 +1775,20 @@ function PK:CreateProfessionsBookButton()
     PK:Debug("PK tab added to ProfessionsBookFrame")
 end
 
+function PK:UpdatePKTabState()
+    local bookFrame = ProfessionsBookFrame
+    if not bookFrame or not bookFrame.pkTab then return end
+    local active = summaryFrame and summaryFrame:IsShown()
+    bookFrame.pkTab.SetTabActive(active)
+end
+
 function PK:ShowSummaryWindowAnchored(anchorFrame)
     if not summaryFrame then
         summaryFrame = self:CreateSummaryWindow()
+        -- Update tab state when the panel is closed by ESC or close button
+        summaryFrame:HookScript("OnHide", function()
+            PK:UpdatePKTabState()
+        end)
     end
     self:RefreshSummaryWindow()
 
@@ -1764,6 +1797,7 @@ function PK:ShowSummaryWindowAnchored(anchorFrame)
     summaryFrame:SetPoint("TOPLEFT", anchorFrame, "TOPLEFT", 0, 5)
     summaryFrame:SetPoint("BOTTOMRIGHT", anchorFrame, "BOTTOMRIGHT", 0, 0)
     summaryFrame:Show()
+    self:UpdatePKTabState()
 end
 
 function PK:ToggleSummaryWindowAnchored(anchorFrame)
