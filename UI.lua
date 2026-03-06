@@ -50,6 +50,23 @@ SlashCmdList["PROFKNOWLEDGE"] = function(msg)
         PK:SetSetting("debug", not current)
         PK:Print("Debug mode: " .. (not current and "|cff00ff00ON|r" or "|cffff0000OFF|r"))
 
+    elseif cmd == "guild" then
+        PK:HandleSyncCommand(strtrim(rest))
+
+    elseif cmd == "sync" then
+        PK:HandleSyncCommand("request")
+
+    elseif cmd == "guildsync" then
+        local current = PK:GetSetting("guildSync")
+        PK:SetSetting("guildSync", not current)
+        PK:Print("Guild sync: " .. (not current and "|cff00ff00ON|r" or "|cffff0000OFF|r"))
+        if not current and not PK.commReady then
+            PK:RegisterSyncHandlers()
+            if PK:InitComm() then
+                PK:StartSync()
+            end
+        end
+
     else
         PK:Print("Unknown command: " .. cmd .. ". Type |cff00ccff/pk help|r for a list.")
     end
@@ -70,6 +87,9 @@ function PK:PrintHelp()
         "  |cff00ccff/pk import|r — Import character data from an export string",
         "  |cff00ccff/pk delete <name>|r — Remove a character from tracking",
         "  |cff00ccff/pk debug|r — Toggle debug messages",
+        "  |cff00ccff/pk guild|r — Show guild sync status",
+        "  |cff00ccff/pk sync|r — Force a guild sync request",
+        "  |cff00ccff/pk guildsync|r — Toggle guild sync on/off",
     }
     for _, line in ipairs(lines) do
         DEFAULT_CHAT_FRAME:AddMessage(line)
@@ -871,7 +891,7 @@ function PK:InitOverlay()
 
     -- Parent to SpecPage so the overlay auto-hides when switching tabs
     overlayFrame = CreateFrame("Frame", nil, specPage, "BackdropTemplate")
-    overlayFrame:SetSize(280, 200)
+    overlayFrame:SetSize(300, 200)
     overlayFrame:SetFrameStrata("HIGH")
 
     -- Profession-UI-matching dark panel with gold-tinted border
@@ -1019,6 +1039,17 @@ function PK:RefreshOverlay()
         end
     end
 
+    -- Filter out characters with 0 points spent (skip current char from filter)
+    local filtered = {}
+    for _, entry in ipairs(chars) do
+        local spent = entry.profData.totalKnowledgeSpent or 0
+        local unspent = entry.profData.unspentKnowledge or 0
+        if spent > 0 or unspent > 0 then
+            table.insert(filtered, entry)
+        end
+    end
+    chars = filtered
+
     if #chars <= 1 then
         overlayFrame:Hide()
         return
@@ -1057,7 +1088,7 @@ function PK:RefreshOverlay()
         local unspent = entry.profData.unspentKnowledge or 0
         local summaryText = scrollChild:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         summaryText:SetPoint("TOPLEFT", 140, yOffset)
-        summaryText:SetWidth(130)
+        summaryText:SetWidth(120)
         summaryText:SetJustifyH("RIGHT")
         local summaryStr = "|cffffffff" .. spent .. " spent|r"
         if unspent > 0 then
@@ -1087,13 +1118,13 @@ function PK:RefreshOverlay()
                 if tSpent > 0 then
                     local tabText = scrollChild:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
                     tabText:SetPoint("TOPLEFT", 12, yOffset)
-                    tabText:SetWidth(170)
+                    tabText:SetWidth(160)
                     tabText:SetJustifyH("LEFT")
                     tabText:SetText("|cffaaaaaa" .. (tabData.name or "?") .. "|r")
                     table.insert(overlayFrame.contentChildren, tabText)
 
                     local tabPts = scrollChild:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-                    tabPts:SetPoint("TOPLEFT", 190, yOffset)
+                    tabPts:SetPoint("TOPLEFT", 180, yOffset)
                     tabPts:SetWidth(80)
                     tabPts:SetJustifyH("RIGHT")
                     tabPts:SetText("|cffffffff" .. tSpent .. "/" .. tMax .. "|r")
@@ -1109,7 +1140,7 @@ function PK:RefreshOverlay()
             yOffset = yOffset - 4
             local sep = scrollChild:CreateTexture(nil, "ARTWORK")
             sep:SetPoint("TOPLEFT", 0, yOffset)
-            sep:SetSize(270, 1)
+            sep:SetSize(260, 1)
             sep:SetColorTexture(0.3, 0.3, 0.3, 0.3)
             table.insert(overlayFrame.contentChildren, sep)
             yOffset = yOffset - 4
@@ -1436,17 +1467,24 @@ end
 ----------------------------------------------------------------------
 
 function PK:CreateProfessionButton()
-    local profFrame = ProfessionsFrame
-    if not profFrame then return end
+    -- Attach to the Professions overview pane (opened with K key)
+    local spellsFrame = PlayerSpellsFrame
+    if not spellsFrame then return end
 
-    local btn = CreateFrame("Button", nil, profFrame, "UIPanelButtonTemplate")
-    btn:SetSize(90, 22)
+    local btn = CreateFrame("Button", nil, spellsFrame, "UIPanelButtonTemplate")
+    btn:SetSize(60, 20)
     btn:SetText("|cff00ccffPK|r")
-    btn:SetPoint("TOPRIGHT", profFrame, "TOPRIGHT", -60, -2)
+    -- Anchor to the left of the close button
+    local closeBtn = spellsFrame.CloseButton or spellsFrame.ClosePanelButton
+    if closeBtn then
+        btn:SetPoint("RIGHT", closeBtn, "LEFT", -4, 0)
+    else
+        btn:SetPoint("TOPRIGHT", spellsFrame, "TOPRIGHT", -60, -2)
+    end
     btn:SetFrameStrata("HIGH")
 
     btn:SetScript("OnClick", function()
-        PK:ShowSummaryWindowAnchored(profFrame)
+        PK:ShowSummaryWindowAnchored(spellsFrame)
     end)
 
     btn:SetScript("OnEnter", function(self)
@@ -1459,7 +1497,7 @@ function PK:CreateProfessionButton()
         GameTooltip:Hide()
     end)
 
-    PK:Debug("PK button added to profession frame")
+    PK:Debug("PK button added to professions overview pane")
 end
 
 function PK:ShowSummaryWindowAnchored(anchorFrame)

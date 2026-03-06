@@ -20,3 +20,6 @@ Desktop.ini
 
 # WoW SavedVariables (generated at runtime, not part of the addon)
 SavedVariables/
+
+# Planning docs
+planning.md

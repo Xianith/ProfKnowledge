@@ -559,7 +559,13 @@ local function SetupProfessionUI()
     if PK.SetupSpecTreeOverlay then
         PK:SetupSpecTreeOverlay()
     end
+end
 
+local function SetupProfessionButton()
+    if PK.profButtonReady then return end
+    if not PlayerSpellsFrame then return end
+
+    PK.profButtonReady = true
     if PK.CreateProfessionButton then
         PK:CreateProfessionButton()
     end
@@ -582,9 +588,22 @@ f:SetScript("OnEvent", function(_, event, name)
             PK:ScanAllProfessions()
         end)
 
+        -- Initialize guild sync (deferred to let guild data load)
+        C_Timer.After(6, function()
+            if PK:GetSetting("guildSync") then
+                PK:RegisterSyncHandlers()
+                if PK:InitComm() then
+                    PK:StartSync()
+                    PK:Print("Guild sync |cff00ff00enabled|r.")
+                end
+            end
+        end)
+
     elseif event == "ADDON_LOADED" then
         if name == "Blizzard_Professions" then
             C_Timer.After(1, SetupProfessionUI)
+        elseif name == "Blizzard_PlayerSpells" then
+            C_Timer.After(1, SetupProfessionButton)
         end
 
     elseif event == "TRADE_SKILL_SHOW" then
@@ -599,6 +618,9 @@ f:SetScript("OnEvent", function(_, event, name)
                     PK:UpdateSpecTreeHighlights()
                 end)
             end
+            -- Broadcast delta to guild after scan
+            PK:SeedOwnData()
+            PK:BroadcastDelta()
         end)
 
     elseif event == "TRADE_SKILL_LIST_UPDATE" then
@@ -613,6 +635,9 @@ f:SetScript("OnEvent", function(_, event, name)
                     PK:UpdateSpecTreeHighlights()
                 end)
             end
+            -- Broadcast delta to guild after scan
+            PK:SeedOwnData()
+            PK:BroadcastDelta()
         end)
 
     elseif event == "TRAIT_CONFIG_UPDATED" then
@@ -627,13 +652,24 @@ f:SetScript("OnEvent", function(_, event, name)
                     PK:UpdateSpecTreeHighlights()
                 end)
             end
+            -- Broadcast delta to guild after scan
+            PK:SeedOwnData()
+            PK:BroadcastDelta()
         end)
 
     elseif event == "SKILL_LINES_CHANGED" then
         -- Profession data loaded/changed
         C_Timer.After(2, function()
             PK:ScanAllProfessions()
+            PK:SeedOwnData()
+            PK:BroadcastDelta()
         end)
+
+    elseif event == "GUILD_ROSTER_UPDATE" then
+        -- Guild roster changed — prune departed members
+        if PK.guildKey then
+            PK:PruneGuildRoster()
+        end
     end
 end)
 
@@ -645,3 +681,4 @@ f:RegisterEvent("TRADE_SKILL_SHOW")
 pcall(f.RegisterEvent, f, "TRADE_SKILL_LIST_UPDATE")
 pcall(f.RegisterEvent, f, "TRAIT_CONFIG_UPDATED")
 pcall(f.RegisterEvent, f, "SKILL_LINES_CHANGED")
+pcall(f.RegisterEvent, f, "GUILD_ROSTER_UPDATE")

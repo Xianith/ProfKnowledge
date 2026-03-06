@@ -9,15 +9,17 @@ local ADDON_NAME, PK = ...
 -- Default database structure
 ----------------------------------------------------------------------
 
-local DB_VERSION = 1
+local DB_VERSION = 2
 
 local DB_DEFAULTS = {
     version = DB_VERSION,
     characters = {},
     discoveredVariants = {},  -- Cache: baseSkillLineID → expansion variant ID
+    guildRoster = {},         -- { ["GuildName-Realm"] = { ["CharName-Realm"] = entry, ... } }
     settings = {
         showOverlay  = true,
         showBadges   = true,
+        guildSync    = true,   -- Enable guild sync by default
         debug        = true,   -- Enable by default during development; /pk debug to toggle
     },
 }
@@ -44,6 +46,9 @@ function PK:InitStorage()
     if not self.db.discoveredVariants then
         self.db.discoveredVariants = {}
     end
+    if not self.db.guildRoster then
+        self.db.guildRoster = {}
+    end
     if not self.db.settings then
         self.db.settings = CopyTable(DB_DEFAULTS.settings)
     else
@@ -66,6 +71,15 @@ end
 
 function PK:MigrateDB(fromVersion, toVersion)
     PK:Debug("Migrating DB from v" .. fromVersion .. " to v" .. toVersion)
+    -- v1 → v2: add guildRoster and guildSync setting
+    if fromVersion < 2 then
+        if not self.db.guildRoster then
+            self.db.guildRoster = {}
+        end
+        if self.db.settings and self.db.settings.guildSync == nil then
+            self.db.settings.guildSync = true
+        end
+    end
 end
 
 ----------------------------------------------------------------------
@@ -621,4 +635,251 @@ function PK:ImportData(text)
     msg = msg .. ": " .. table.concat(importedChars, ", ")
 
     return true, msg
+end
+
+----------------------------------------------------------------------
+-- Guild Roster — synced profession data for guild members
+----------------------------------------------------------------------
+
+--- Initialize the guild roster for the current guild.
+function PK:InitGuildRoster()
+    if not self.db or not self.guildKey then return end
+    if not self.db.guildRoster then
+        self.db.guildRoster = {}
+    end
+    if not self.db.guildRoster[self.guildKey] then
+        self.db.guildRoster[self.guildKey] = {}
+    end
+
+    -- Seed our own data into the guild roster
+    self:SeedOwnData()
+end
+
+--- Get the guild roster table for the current guild.
+function PK:GetGuildRoster()
+    if not self.db or not self.guildKey then return nil end
+    return self.db.guildRoster and self.db.guildRoster[self.guildKey]
+end
+
+--- Seed the current character's data into the guild roster.
+--- Local player data is always authoritative.
+function PK:SeedOwnData()
+    if not self.db or not self.guildKey or not self.charKey then return end
+
+    local charData = self:GetCurrentCharacterData()
+    if not charData then return end
+
+    local roster = self.db.guildRoster[self.guildKey]
+    if not roster then return end
+
+    roster[self.charKey] = {
+        className   = charData.className,
+        classID     = charData.classID,
+        level       = charData.level,
+        lastScanned = charData.lastScanned,
+        lastUpdate  = time(),
+        prof1BaseID = charData.prof1BaseID,
+        prof2BaseID = charData.prof2BaseID,
+        professions = charData.professions,
+        isLocal     = true,  -- marks this as our own data (never overwritten by sync)
+    }
+end
+
+--- Merge a guild member's data into the roster.
+--- Uses timestamp-domination: newer lastUpdate wins.
+--- Own data (isLocal) is never overwritten by incoming data.
+--- Returns true if the merge resulted in new/updated data.
+function PK:MergeGuildMember(charKey, incomingData)
+    if not self.db or not self.guildKey or not charKey or not incomingData then
+        return false
+    end
+
+    local roster = self.db.guildRoster[self.guildKey]
+    if not roster then
+        self:InitGuildRoster()
+        roster = self.db.guildRoster[self.guildKey]
+    end
+
+    local existing = roster[charKey]
+
+    -- Never overwrite our own data with sync data
+    if existing and existing.isLocal then
+        return false
+    end
+
+    -- Also don't overwrite if this is our current character
+    if charKey == self.charKey then
+        return false
+    end
+
+    -- Timestamp domination: only accept newer data
+    local incomingTs = incomingData.lastScanned or incomingData.lastUpdate or 0
+    if existing then
+        local existingTs = existing.lastUpdate or existing.lastScanned or 0
+        if incomingTs <= existingTs then
+            return false  -- we already have newer or equal data
+        end
+    end
+
+    -- Merge the data
+    roster[charKey] = {
+        className   = incomingData.className,
+        classID     = incomingData.classID,
+        level       = incomingData.level,
+        lastScanned = incomingData.lastScanned,
+        lastUpdate  = incomingTs,
+        prof1BaseID = incomingData.prof1BaseID,
+        prof2BaseID = incomingData.prof2BaseID,
+        professions = incomingData.professions,
+        isLocal     = false,
+    }
+
+    return true
+end
+
+--- Get all guild members with a specific profession.
+--- Returns: { { charKey, className, classID, level, profData, lastUpdate }, ... }
+function PK:GetGuildCharactersForProfession(skillLineID)
+    local results = {}
+    local roster = self:GetGuildRoster()
+    if not roster then return results end
+
+    for charKey, entry in pairs(roster) do
+        if entry.professions and entry.professions[skillLineID] then
+            local profData = entry.professions[skillLineID]
+            -- Skip excluded expansions
+            if not (profData.expansionName and PK.ExcludedExpansions[profData.expansionName]) then
+                table.insert(results, {
+                    charKey    = charKey,
+                    className  = entry.className,
+                    classID    = entry.classID,
+                    level      = entry.level,
+                    profData   = profData,
+                    lastUpdate = entry.lastUpdate,
+                    isLocal    = entry.isLocal,
+                })
+            end
+        end
+    end
+
+    -- Sort: local chars first, then by name
+    local currentKey = self.charKey
+    table.sort(results, function(a, b)
+        if a.charKey == currentKey then return true end
+        if b.charKey == currentKey then return false end
+        if a.isLocal and not b.isLocal then return true end
+        if not a.isLocal and b.isLocal then return false end
+        return a.charKey < b.charKey
+    end)
+
+    return results
+end
+
+--- Get all guild roster entries (for the summary display).
+--- Returns: { { charKey, className, classID, level, professions, lastUpdate, isLocal }, ... }
+function PK:GetAllGuildCharacters(filterProfession)
+    local results = {}
+    local roster = self:GetGuildRoster()
+    if not roster then return results end
+
+    for charKey, entry in pairs(roster) do
+        local profs = entry.professions or {}
+
+        -- Filter out excluded expansions and apply profession filter
+        local filtered = {}
+        for skillLineID, profData in pairs(profs) do
+            local keep = true
+            if profData.expansionName and PK.ExcludedExpansions[profData.expansionName] then
+                keep = false
+            end
+            if filterProfession and skillLineID ~= filterProfession then
+                keep = false
+            end
+            if keep then
+                filtered[skillLineID] = profData
+            end
+        end
+
+        if next(filtered) then
+            table.insert(results, {
+                charKey     = charKey,
+                className   = entry.className,
+                classID     = entry.classID,
+                level       = entry.level,
+                lastScanned = entry.lastScanned,
+                lastUpdate  = entry.lastUpdate,
+                prof1BaseID = entry.prof1BaseID,
+                prof2BaseID = entry.prof2BaseID,
+                professions = filtered,
+                isLocal     = entry.isLocal,
+            })
+        end
+    end
+
+    -- Sort: local chars first, then alphabetically
+    local currentKey = self.charKey
+    table.sort(results, function(a, b)
+        if a.charKey == currentKey then return true end
+        if b.charKey == currentKey then return false end
+        if a.isLocal and not b.isLocal then return true end
+        if not a.isLocal and b.isLocal then return false end
+        return a.charKey < b.charKey
+    end)
+
+    return results
+end
+
+--- Get count of guild roster entries.
+function PK:GetGuildRosterCount()
+    local count = 0
+    local roster = self:GetGuildRoster()
+    if roster then
+        for _ in pairs(roster) do
+            count = count + 1
+        end
+    end
+    return count
+end
+
+--- Prune departed guild members after the grace period.
+--- Call this periodically (e.g., on GUILD_ROSTER_UPDATE).
+function PK:PruneGuildRoster()
+    if not self.db or not self.guildKey then return end
+    local roster = self.db.guildRoster[self.guildKey]
+    if not roster then return end
+
+    -- Get current guild member names
+    local guildMembers = {}
+    local numMembers = GetNumGuildMembers()
+    for i = 1, numMembers do
+        local name = GetGuildRosterInfo(i)
+        if name then
+            -- Strip realm if same-realm
+            local shortName = name:match("^([^%-]+)")
+            guildMembers[shortName] = true
+            guildMembers[name] = true
+        end
+    end
+
+    local now = time()
+    local GRACE_PERIOD = 30 * 24 * 3600  -- 30 days
+
+    for charKey, entry in pairs(roster) do
+        if not entry.isLocal then
+            local charName = charKey:match("^([^%-]+)")
+            if charName and not guildMembers[charName] and not guildMembers[charKey] then
+                -- Member not in guild — check grace period
+                if not entry._absentSince then
+                    entry._absentSince = now
+                    PK:Debug("Guild member departed: " .. charKey)
+                elseif (now - entry._absentSince) > GRACE_PERIOD then
+                    PK:Debug("Pruning departed member: " .. charKey)
+                    roster[charKey] = nil
+                end
+            else
+                -- Member is in guild — clear absent flag
+                entry._absentSince = nil
+            end
+        end
+    end
 end

@@ -1,13 +1,17 @@
 ## Interface: 120000, 120001
 ## Title: |cff00ccffProf|r|cffffffffKnowledge|r
-## Notes: Track profession knowledge across all characters on your account.
+## Notes: Track profession knowledge across all characters and sync with guild members.
 ## Author: Claude & Friends
-## Version: 1.0.0
+## Version: 1.1.0
 ## SavedVariables: ProfKnowledgeDB
 ## IconTexture: Interface\Icons\INV_Misc_Book_11
 ## X-Category: Professions
 
+Libs\embeds.xml
+
 Core.lua
 Data.lua
 Storage.lua
+Comm.lua
+Sync.lua
 UI.lua
