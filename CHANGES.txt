@@ -1,0 +1,42 @@
+## v0.1.0 — Initial Release
+
+### Account-Wide Profession Tracking
+- Automatically scans all professions when a crafting window is opened
+- Tracks knowledge spent, unspent, skill levels, and specialization tree progress
+- Supports all 14 professions (crafting, gathering, and secondary)
+- Expansion-aware variant discovery with automatic database migration
+- Import/Export for sharing data between accounts as text strings
+
+### Summary Window
+- Portrait-style frame anchored to the Professions Book
+- Grid view of all tracked characters with knowledge totals per profession
+- Profession filter dropdown to focus on a single profession
+- PK tab on the Professions Book for quick access (toggles open/closed)
+- Guild sync status bar with online user count and sync state indicators
+
+### Spec Tree Overlays
+- Color-coded circles on specialization tree nodes showing alt progress:
+  - Purple: node fully maxed on at least one alt
+  - Blue: partial progress on an alt, with highest rank number shown below
+  - Green: node purchased on an alt but no additional ranks
+  - Orange: current character is top-ranked, overlays Blizzard's green number
+- Hover tooltip showing per-alt rank breakdown for each node
+
+### Guild Sync
+- Automatic data sharing with guild members running ProfKnowledge
+- DR/BDR (Designated Router / Backup) election — no configuration needed
+- Version vector sync transfers only changed data
+- Compressed wire format via LibDeflate for large payloads
+- Chunked responses to avoid chat throttling
+- Delta broadcasts after each profession scan
+
+### Slash Commands
+- /pk — Toggle summary window
+- /pk scan — Force re-scan professions
+- /pk list — List tracked characters in chat
+- /pk export / /pk import — Data portability
+- /pk delete <name> — Remove a character
+- /pk guild — Show sync status
+- /pk sync — Force guild sync
+- /pk guildsync — Toggle sync on/off
+- /pk debug — Toggle debug output
