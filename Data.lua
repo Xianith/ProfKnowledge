@@ -46,6 +46,7 @@ PK.ProfessionData = {
     [197]  = { name = "Tailoring",      icon = "Interface\\Icons\\Trade_Tailoring" },
     [185]  = { name = "Cooking",        icon = "Interface\\Icons\\INV_Misc_Food_15" },
     [356]  = { name = "Fishing",        icon = "Interface\\Icons\\Trade_Fishing" },
+    [794]  = { name = "Archaeology",    icon = "Interface\\Icons\\Trade_Archaeology" },
 }
 
 ----------------------------------------------------------------------
@@ -98,6 +99,34 @@ PK.CraftingProfessions = {
 }
 
 ----------------------------------------------------------------------
+-- Secondary / universal professions (always get fixed columns in UI)
+-- Main professions are any profession NOT in this table.
+----------------------------------------------------------------------
+
+PK.SecondaryProfessions = {
+    [185]  = true,  -- Cooking
+    [356]  = true,  -- Fishing
+    [794]  = true,  -- Archaeology
+}
+
+----------------------------------------------------------------------
+-- Expansion display names
+-- Maps the expansion prefix extracted from variant profession names
+-- (e.g. "Khaz Algar") to user-friendly expansion names.
+----------------------------------------------------------------------
+
+PK.ExpansionDisplayNames = {
+    ["Khaz Algar"] = "The War Within",
+    -- Midnight prefix will be auto-discovered; add mapping here if needed
+}
+
+--- Old expansions to exclude from the summary window.
+--- Professions tagged with these expansion names are filtered out.
+PK.ExcludedExpansions = {
+    ["Dragon Isles"] = true,
+}
+
+----------------------------------------------------------------------
 -- Display order for professions in the summary window
 ----------------------------------------------------------------------
 
@@ -114,6 +143,8 @@ PK.ProfessionOrder = {
     182,   -- Herbalism
     186,   -- Mining
     393,   -- Skinning
+    356,   -- Fishing
+    794,   -- Archaeology
 }
 
 ----------------------------------------------------------------------
@@ -134,4 +165,5 @@ PK.ProfessionShortNames = {
     [186]  = "Mine",
     [393]  = "Skin",
     [356]  = "Fish",
+    [794]  = "Arch",
 }

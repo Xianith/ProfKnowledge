@@ -9,16 +9,18 @@ local ADDON_NAME, PK = ...
 -- Default database structure
 ----------------------------------------------------------------------
 
-local DB_VERSION = 1
+local DB_VERSION = 2
 
 local DB_DEFAULTS = {
     version = DB_VERSION,
     characters = {},
     discoveredVariants = {},  -- Cache: baseSkillLineID → expansion variant ID
+    guildRoster = {},         -- { ["GuildName-Realm"] = { ["CharName-Realm"] = entry, ... } }
     settings = {
         showOverlay  = true,
         showBadges   = true,
-        debug        = true,   -- Enable by default during development; /pk debug to toggle
+        guildSync    = true,   -- Enable guild sync by default
+        debug        = false,  -- /pk debug to toggle
     },
 }
 
@@ -44,6 +46,9 @@ function PK:InitStorage()
     if not self.db.discoveredVariants then
         self.db.discoveredVariants = {}
     end
+    if not self.db.guildRoster then
+        self.db.guildRoster = {}
+    end
     if not self.db.settings then
         self.db.settings = CopyTable(DB_DEFAULTS.settings)
     else
@@ -66,6 +71,15 @@ end
 
 function PK:MigrateDB(fromVersion, toVersion)
     PK:Debug("Migrating DB from v" .. fromVersion .. " to v" .. toVersion)
+    -- v1 → v2: add guildRoster and guildSync setting
+    if fromVersion < 2 then
+        if not self.db.guildRoster then
+            self.db.guildRoster = {}
+        end
+        if self.db.settings and self.db.settings.guildSync == nil then
+            self.db.settings.guildSync = true
+        end
+    end
 end
 
 ----------------------------------------------------------------------
@@ -86,7 +100,18 @@ end
 -- Character data operations
 ----------------------------------------------------------------------
 
-function PK:SaveCharacterData(profData)
+--- Returns true if a profession entry has no meaningful data (0/0 skill, no knowledge, no tabs).
+function PK:IsEmptyProfession(profData)
+    if not profData then return true end
+    local level = profData.skillLevel or 0
+    local maxLevel = profData.maxSkillLevel or 0
+    local spent = profData.totalKnowledgeSpent or 0
+    local unspent = profData.unspentKnowledge or 0
+    local hasTabs = profData.tabs and next(profData.tabs)
+    return level == 0 and maxLevel == 0 and spent == 0 and unspent == 0 and not hasTabs
+end
+
+function PK:SaveCharacterData(profData, prof1BaseID, prof2BaseID)
     if not self.db or not self.charKey then return end
 
     self.db.characters[self.charKey] = {
@@ -94,6 +119,8 @@ function PK:SaveCharacterData(profData)
         classID     = self.playerClassID,
         level       = self.playerLevel,
         lastScanned = time(),
+        prof1BaseID = prof1BaseID,
+        prof2BaseID = prof2BaseID,
         professions = profData,
     }
 
@@ -113,21 +140,32 @@ end
 -- Cross-character queries
 ----------------------------------------------------------------------
 
---- Get all characters that have a specific profession
+--- Get all characters that have a specific profession.
+--- If filterVariantID is given, only returns characters whose stored
+--- variantID matches (same expansion, e.g. Midnight vs TWW).
 --- Returns: { { charKey, className, classID, level, profData }, ... }
-function PK:GetAllCharactersForProfession(skillLineID)
+function PK:GetAllCharactersForProfession(skillLineID, filterVariantID)
     local results = {}
     if not self.db or not self.db.characters then return results end
 
     for charKey, charData in pairs(self.db.characters) do
         if charData.professions and charData.professions[skillLineID] then
-            table.insert(results, {
-                charKey   = charKey,
-                className = charData.className,
-                classID   = charData.classID,
-                level     = charData.level,
-                profData  = charData.professions[skillLineID],
-            })
+            local profData = charData.professions[skillLineID]
+            -- Filter by expansion variant when requested.
+            -- If the stored data has no variantID (legacy / imported), treat as wildcard match.
+            local variantMatch = (not filterVariantID)
+                or (not profData.variantID)
+                or (profData.variantID == filterVariantID)
+                or (profData.skillLineID and profData.skillLineID == filterVariantID)
+            if variantMatch then
+                table.insert(results, {
+                    charKey   = charKey,
+                    className = charData.className,
+                    classID   = charData.classID,
+                    level     = charData.level,
+                    profData  = profData,
+                })
+            end
         end
     end
 
@@ -142,21 +180,52 @@ function PK:GetAllCharactersForProfession(skillLineID)
     return results
 end
 
---- Get all characters and all their professions (for summary window)
+--- Get all characters and their professions (for summary window).
+--- Automatically excludes professions from old expansions (PK.ExcludedExpansions).
+--- filterProfession: if given (a skillLineID), only that profession is included.
 --- Returns: { { charKey, className, classID, level, professions = { [skillLineID] = profData, ... } }, ... }
-function PK:GetAllCharacters()
+function PK:GetAllCharacters(filterProfession)
     local results = {}
     if not self.db or not self.db.characters then return results end
 
     for charKey, charData in pairs(self.db.characters) do
-        table.insert(results, {
-            charKey     = charKey,
-            className   = charData.className,
-            classID     = charData.classID,
-            level       = charData.level,
-            lastScanned = charData.lastScanned,
-            professions = charData.professions or {},
-        })
+        local profs = charData.professions or {}
+
+        -- Always filter out old-expansion professions, empties, and apply profession filter
+        local filtered = {}
+        for skillLineID, profData in pairs(profs) do
+            local keep = true
+            -- Exclude professions from old expansions (e.g. Dragon Isles)
+            if profData.expansionName and PK.ExcludedExpansions[profData.expansionName] then
+                keep = false
+            end
+            -- Exclude empty placeholder professions (0/0, no knowledge, no tabs)
+            if self:IsEmptyProfession(profData) then
+                keep = false
+            end
+            -- Profession filter
+            if filterProfession and skillLineID ~= filterProfession then
+                keep = false
+            end
+            if keep then
+                filtered[skillLineID] = profData
+            end
+        end
+        profs = filtered
+
+        -- Only include character if they have at least one profession after filtering
+        if next(profs) then
+            table.insert(results, {
+                charKey     = charKey,
+                className   = charData.className,
+                classID     = charData.classID,
+                level       = charData.level,
+                lastScanned = charData.lastScanned,
+                prof1BaseID = charData.prof1BaseID,
+                prof2BaseID = charData.prof2BaseID,
+                professions = profs,
+            })
+        end
     end
 
     -- Sort: current character first, then alphabetically
@@ -265,10 +334,12 @@ function PK:ExportAllData()
             add("  Last Scanned: " .. date("%Y-%m-%d %H:%M", lastScanned))
         end
 
-        -- Sort professions by display order
+        -- Sort professions by display order (skip empties)
         local profKeys = {}
-        for skillLineID in pairs(char.professions) do
-            table.insert(profKeys, skillLineID)
+        for skillLineID, profData in pairs(char.professions) do
+            if not self:IsEmptyProfession(profData) then
+                table.insert(profKeys, skillLineID)
+            end
         end
         local orderMap = {}
         for i, id in ipairs(PK.ProfessionOrder) do
@@ -581,4 +652,251 @@ function PK:ImportData(text)
     msg = msg .. ": " .. table.concat(importedChars, ", ")
 
     return true, msg
+end
+
+----------------------------------------------------------------------
+-- Guild Roster — synced profession data for guild members
+----------------------------------------------------------------------
+
+--- Initialize the guild roster for the current guild.
+function PK:InitGuildRoster()
+    if not self.db or not self.guildKey then return end
+    if not self.db.guildRoster then
+        self.db.guildRoster = {}
+    end
+    if not self.db.guildRoster[self.guildKey] then
+        self.db.guildRoster[self.guildKey] = {}
+    end
+
+    -- Seed our own data into the guild roster
+    self:SeedOwnData()
+end
+
+--- Get the guild roster table for the current guild.
+function PK:GetGuildRoster()
+    if not self.db or not self.guildKey then return nil end
+    return self.db.guildRoster and self.db.guildRoster[self.guildKey]
+end
+
+--- Seed the current character's data into the guild roster.
+--- Local player data is always authoritative.
+function PK:SeedOwnData()
+    if not self.db or not self.guildKey or not self.charKey then return end
+
+    local charData = self:GetCurrentCharacterData()
+    if not charData then return end
+
+    local roster = self.db.guildRoster[self.guildKey]
+    if not roster then return end
+
+    roster[self.charKey] = {
+        className   = charData.className,
+        classID     = charData.classID,
+        level       = charData.level,
+        lastScanned = charData.lastScanned,
+        lastUpdate  = time(),
+        prof1BaseID = charData.prof1BaseID,
+        prof2BaseID = charData.prof2BaseID,
+        professions = charData.professions,
+        isLocal     = true,  -- marks this as our own data (never overwritten by sync)
+    }
+end
+
+--- Merge a guild member's data into the roster.
+--- Uses timestamp-domination: newer lastUpdate wins.
+--- Own data (isLocal) is never overwritten by incoming data.
+--- Returns true if the merge resulted in new/updated data.
+function PK:MergeGuildMember(charKey, incomingData)
+    if not self.db or not self.guildKey or not charKey or not incomingData then
+        return false
+    end
+
+    local roster = self.db.guildRoster[self.guildKey]
+    if not roster then
+        self:InitGuildRoster()
+        roster = self.db.guildRoster[self.guildKey]
+    end
+
+    local existing = roster[charKey]
+
+    -- Never overwrite our own data with sync data
+    if existing and existing.isLocal then
+        return false
+    end
+
+    -- Also don't overwrite if this is our current character
+    if charKey == self.charKey then
+        return false
+    end
+
+    -- Timestamp domination: only accept newer data
+    local incomingTs = incomingData.lastScanned or incomingData.lastUpdate or 0
+    if existing then
+        local existingTs = existing.lastUpdate or existing.lastScanned or 0
+        if incomingTs <= existingTs then
+            return false  -- we already have newer or equal data
+        end
+    end
+
+    -- Merge the data
+    roster[charKey] = {
+        className   = incomingData.className,
+        classID     = incomingData.classID,
+        level       = incomingData.level,
+        lastScanned = incomingData.lastScanned,
+        lastUpdate  = incomingTs,
+        prof1BaseID = incomingData.prof1BaseID,
+        prof2BaseID = incomingData.prof2BaseID,
+        professions = incomingData.professions,
+        isLocal     = false,
+    }
+
+    return true
+end
+
+--- Get all guild members with a specific profession.
+--- Returns: { { charKey, className, classID, level, profData, lastUpdate }, ... }
+function PK:GetGuildCharactersForProfession(skillLineID)
+    local results = {}
+    local roster = self:GetGuildRoster()
+    if not roster then return results end
+
+    for charKey, entry in pairs(roster) do
+        if entry.professions and entry.professions[skillLineID] then
+            local profData = entry.professions[skillLineID]
+            -- Skip excluded expansions
+            if not (profData.expansionName and PK.ExcludedExpansions[profData.expansionName]) then
+                table.insert(results, {
+                    charKey    = charKey,
+                    className  = entry.className,
+                    classID    = entry.classID,
+                    level      = entry.level,
+                    profData   = profData,
+                    lastUpdate = entry.lastUpdate,
+                    isLocal    = entry.isLocal,
+                })
+            end
+        end
+    end
+
+    -- Sort: local chars first, then by name
+    local currentKey = self.charKey
+    table.sort(results, function(a, b)
+        if a.charKey == currentKey then return true end
+        if b.charKey == currentKey then return false end
+        if a.isLocal and not b.isLocal then return true end
+        if not a.isLocal and b.isLocal then return false end
+        return a.charKey < b.charKey
+    end)
+
+    return results
+end
+
+--- Get all guild roster entries (for the summary display).
+--- Returns: { { charKey, className, classID, level, professions, lastUpdate, isLocal }, ... }
+function PK:GetAllGuildCharacters(filterProfession)
+    local results = {}
+    local roster = self:GetGuildRoster()
+    if not roster then return results end
+
+    for charKey, entry in pairs(roster) do
+        local profs = entry.professions or {}
+
+        -- Filter out excluded expansions and apply profession filter
+        local filtered = {}
+        for skillLineID, profData in pairs(profs) do
+            local keep = true
+            if profData.expansionName and PK.ExcludedExpansions[profData.expansionName] then
+                keep = false
+            end
+            if filterProfession and skillLineID ~= filterProfession then
+                keep = false
+            end
+            if keep then
+                filtered[skillLineID] = profData
+            end
+        end
+
+        if next(filtered) then
+            table.insert(results, {
+                charKey     = charKey,
+                className   = entry.className,
+                classID     = entry.classID,
+                level       = entry.level,
+                lastScanned = entry.lastScanned,
+                lastUpdate  = entry.lastUpdate,
+                prof1BaseID = entry.prof1BaseID,
+                prof2BaseID = entry.prof2BaseID,
+                professions = filtered,
+                isLocal     = entry.isLocal,
+            })
+        end
+    end
+
+    -- Sort: local chars first, then alphabetically
+    local currentKey = self.charKey
+    table.sort(results, function(a, b)
+        if a.charKey == currentKey then return true end
+        if b.charKey == currentKey then return false end
+        if a.isLocal and not b.isLocal then return true end
+        if not a.isLocal and b.isLocal then return false end
+        return a.charKey < b.charKey
+    end)
+
+    return results
+end
+
+--- Get count of guild roster entries.
+function PK:GetGuildRosterCount()
+    local count = 0
+    local roster = self:GetGuildRoster()
+    if roster then
+        for _ in pairs(roster) do
+            count = count + 1
+        end
+    end
+    return count
+end
+
+--- Prune departed guild members after the grace period.
+--- Call this periodically (e.g., on GUILD_ROSTER_UPDATE).
+function PK:PruneGuildRoster()
+    if not self.db or not self.guildKey then return end
+    local roster = self.db.guildRoster[self.guildKey]
+    if not roster then return end
+
+    -- Get current guild member names
+    local guildMembers = {}
+    local numMembers = GetNumGuildMembers()
+    for i = 1, numMembers do
+        local name = GetGuildRosterInfo(i)
+        if name then
+            -- Strip realm if same-realm
+            local shortName = name:match("^([^%-]+)")
+            guildMembers[shortName] = true
+            guildMembers[name] = true
+        end
+    end
+
+    local now = time()
+    local GRACE_PERIOD = 30 * 24 * 3600  -- 30 days
+
+    for charKey, entry in pairs(roster) do
+        if not entry.isLocal then
+            local charName = charKey:match("^([^%-]+)")
+            if charName and not guildMembers[charName] and not guildMembers[charKey] then
+                -- Member not in guild — check grace period
+                if not entry._absentSince then
+                    entry._absentSince = now
+                    PK:Debug("Guild member departed: " .. charKey)
+                elseif (now - entry._absentSince) > GRACE_PERIOD then
+                    PK:Debug("Pruning departed member: " .. charKey)
+                    roster[charKey] = nil
+                end
+            else
+                -- Member is in guild — clear absent flag
+                entry._absentSince = nil
+            end
+        end
+    end
 end

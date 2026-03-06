@@ -123,9 +123,10 @@ function PK:ScanAllProfessions()
     end
 
     -- Get basic profession info first (always works)
-    local prof1, prof2, cooking = GetProfessions()
+    -- GetProfessions() returns: prof1, prof2, archaeology, fishing, cooking
+    local prof1, prof2, archaeology, fishing, cooking = GetProfessions()
     local basicInfo = {}  -- baseSkillLineID → { name, icon, skillLevel, maxSkillLevel }
-    for _, profIndex in ipairs({ prof1, prof2, cooking }) do
+    for _, profIndex in ipairs({ prof1, prof2, archaeology, fishing, cooking }) do
         if profIndex then
             local name, icon, skillLevel, maxSkillLevel, _, _, skillLineID = GetProfessionInfo(profIndex)
             if skillLineID and name then
@@ -137,6 +138,17 @@ function PK:ScanAllProfessions()
                 }
             end
         end
+    end
+
+    -- Track which base skillLineIDs are in the main profession slots
+    local prof1BaseID, prof2BaseID = nil, nil
+    if prof1 then
+        local _, _, _, _, _, _, sid = GetProfessionInfo(prof1)
+        prof1BaseID = sid
+    end
+    if prof2 then
+        local _, _, _, _, _, _, sid = GetProfessionInfo(prof2)
+        prof2BaseID = sid
     end
 
     -- Now discover variant IDs and scan spec trees
@@ -193,34 +205,52 @@ function PK:ScanAllProfessions()
     if self.db and self.db.characters and self.db.characters[self.charKey] then
         local existing = self.db.characters[self.charKey].professions or {}
         for baseID, newData in pairs(profData) do
-            if newData.hasSpec and (not newData.tabs or next(newData.tabs) == nil) then
-                local cached = existing[baseID]
-                if cached and cached.tabs and next(cached.tabs) ~= nil then
-                    PK:Debug("Preserving cached tree data for " .. (newData.name or "?"))
-                    newData.tabs = cached.tabs
-                    newData.totalKnowledgeSpent = cached.totalKnowledgeSpent or 0
-                    newData.unspentKnowledge = cached.unspentKnowledge or 0
+            local cached = existing[baseID]
+            if cached then
+                -- Preserve variant/expansion info from earlier scans if missing
+                if not newData.variantID and cached.variantID then
+                    newData.variantID = cached.variantID
+                end
+                if not newData.expansionName and cached.expansionName then
+                    newData.expansionName = cached.expansionName
+                end
+                -- Preserve tree data when the new scan came up empty
+                if newData.hasSpec and (not newData.tabs or next(newData.tabs) == nil) then
+                    if cached.tabs and next(cached.tabs) ~= nil then
+                        PK:Debug("Preserving cached tree data for " .. (newData.name or "?"))
+                        newData.tabs = cached.tabs
+                        newData.totalKnowledgeSpent = cached.totalKnowledgeSpent or 0
+                        newData.unspentKnowledge = cached.unspentKnowledge or 0
+                    end
                 end
             end
         end
     end
 
-    -- Save
-    self:SaveCharacterData(profData)
+    -- Save (include prof slot assignments)
+    self:SaveCharacterData(profData, prof1BaseID, prof2BaseID)
 
     local count = 0
     for _ in pairs(profData) do count = count + 1 end
-    PK:Debug("Scanned " .. count .. " profession(s) for " .. self.charKey)
+    PK:Debug("Scanned " .. count .. " profession(s) for " .. self.charKey
+        .. " (prof1=" .. tostring(prof1BaseID) .. " prof2=" .. tostring(prof2BaseID) .. ")")
 end
 
 function PK:IsBetterScan(newScan, oldScan)
-    -- Prefer scans with actual tree data
+    -- Prefer higher variant IDs — newer expansions always have higher IDs.
+    -- This ensures Midnight variants beat TWW, which beats Dragon Isles, etc.
+    local newVID = newScan.variantID or newScan.skillLineID or 0
+    local oldVID = oldScan.variantID or oldScan.skillLineID or 0
+    if newVID ~= oldVID then
+        return newVID > oldVID
+    end
+    -- Same variant: prefer scans with actual tree data
     local newHasTabs = newScan.tabs and next(newScan.tabs) ~= nil
     local oldHasTabs = oldScan.tabs and next(oldScan.tabs) ~= nil
     if newHasTabs and not oldHasTabs then return true end
     if not newHasTabs and oldHasTabs then return false end
-    -- Prefer higher skill levels (more recent expansion)
-    return (newScan.skillLevel or 0) >= (oldScan.skillLevel or 0)
+    -- Same variant, same tab status: prefer higher skill level
+    return (newScan.skillLevel or 0) > (oldScan.skillLevel or 0)
 end
 
 ----------------------------------------------------------------------
@@ -258,7 +288,27 @@ function PK:ScanVariant(variantID, basicInfo)
         end
     end
 
-    PK:Debug("Scanning variant " .. variantID .. " (" .. profName .. ") parent=" .. tostring(parentID))
+    -- Determine expansion name from the variant profession name.
+    -- e.g., professionName = "Khaz Algar Alchemy" and parentProfessionName = "Alchemy"
+    -- expansion prefix = "Khaz Algar" → display name "The War Within"
+    local expansionName = nil
+    if profInfo then
+        local variantFullName = profInfo.professionName or ""
+        local baseName = profInfo.parentProfessionName or profName or ""
+        -- Strip the base name from the end of the variant name to get the expansion prefix
+        if baseName ~= "" and variantFullName ~= "" and variantFullName ~= baseName then
+            local pattern = "%s*" .. baseName:gsub("([%(%)%.%%%+%-%*%?%[%^%$])", "%%%1") .. "$"
+            local prefix = variantFullName:gsub(pattern, "")
+            if prefix ~= "" and prefix ~= variantFullName then
+                prefix = strtrim(prefix)
+                -- Map raw prefix (e.g. "Khaz Algar") → display name ("The War Within")
+                expansionName = PK.ExpansionDisplayNames[prefix] or prefix
+            end
+        end
+    end
+
+    PK:Debug("Scanning variant " .. variantID .. " (" .. profName .. ") parent=" .. tostring(parentID)
+        .. " expansion=" .. tostring(expansionName))
 
     -- Check if this variant has a specialization tree
     local hasSpec = false
@@ -273,6 +323,7 @@ function PK:ScanVariant(variantID, basicInfo)
             skillLineID         = variantID,
             baseSkillLineID     = baseID,
             variantID           = variantID,
+            expansionName       = expansionName,
             name                = profName,
             icon                = icon,
             skillLevel          = skillLevel,
@@ -297,6 +348,7 @@ function PK:ScanVariant(variantID, basicInfo)
             skillLineID         = variantID,
             baseSkillLineID     = baseID,
             variantID           = variantID,
+            expansionName       = expansionName,
             name                = profName,
             icon                = icon,
             skillLevel          = skillLevel,
@@ -355,6 +407,7 @@ function PK:ScanVariant(variantID, basicInfo)
         skillLineID         = variantID,
         baseSkillLineID     = baseID,
         variantID           = variantID,
+        expansionName       = expansionName,
         name                = profName,
         icon                = icon,
         skillLevel          = skillLevel,
@@ -502,6 +555,31 @@ local function SetupProfessionUI()
     if PK.InitOverlay then
         PK:InitOverlay()
     end
+
+    if PK.SetupSpecTreeOverlay then
+        PK:SetupSpecTreeOverlay()
+    end
+
+end
+
+local function SetupProfessionsBookButton()
+    if PK.profBookButtonReady then return end
+    if not ProfessionsBookFrame then return end
+
+    PK.profBookButtonReady = true
+    if PK.CreateProfessionsBookButton then
+        PK:CreateProfessionsBookButton()
+    end
+end
+
+local function SetupProfessionButton()
+    if PK.profButtonReady then return end
+    if not PlayerSpellsFrame then return end
+
+    PK.profButtonReady = true
+    if PK.CreateProfessionButton then
+        PK:CreateProfessionButton()
+    end
 end
 
 ----------------------------------------------------------------------
@@ -521,27 +599,67 @@ f:SetScript("OnEvent", function(_, event, name)
             PK:ScanAllProfessions()
         end)
 
-    elseif event == "ADDON_LOADED" then
-        if name == "Blizzard_Professions" then
-            C_Timer.After(1, SetupProfessionUI)
-        end
-
-    elseif event == "TRADE_SKILL_SHOW" then
-        -- Profession window opened — best time to scan
-        C_Timer.After(0.5, function()
-            PK:DeepScanCurrentProfession()
-            if PK.profFrameReady and PK.RefreshOverlay then
-                PK:RefreshOverlay()
+        -- Initialize guild sync (deferred to let guild data load)
+        C_Timer.After(6, function()
+            if PK:GetSetting("guildSync") then
+                PK:RegisterSyncHandlers()
+                if PK:InitComm() then
+                    PK:StartSync()
+                    PK:Print("Guild sync |cff00ff00enabled|r.")
+                end
             end
         end)
 
-    elseif event == "TRADE_SKILL_LIST_UPDATE" then
-        -- Profession data has fully loaded — good time for deep scan
+    elseif event == "ADDON_LOADED" then
+        if name == "Blizzard_Professions" then
+            C_Timer.After(1, SetupProfessionUI)
+        elseif name == "Blizzard_PlayerSpells" then
+            C_Timer.After(1, SetupProfessionButton)
+        elseif name == "Blizzard_ProfessionsBook" or name == "Blizzard_ProfessionBook" then
+            C_Timer.After(1, SetupProfessionsBookButton)
+        end
+
+        -- Fallback: try to attach PK button whenever any profession addon loads
+        if ProfessionsBookFrame and not PK.profBookButtonReady then
+            C_Timer.After(1, SetupProfessionsBookButton)
+        end
+
+    elseif event == "TRADE_SKILL_SHOW" then
+        -- Also try ProfessionsBookFrame button here as a fallback
+        if not PK.profBookButtonReady then
+            SetupProfessionsBookButton()
+        end
+        -- Profession window opened -- best time to scan
         C_Timer.After(0.5, function()
             PK:DeepScanCurrentProfession()
             if PK.profFrameReady and PK.RefreshOverlay then
                 PK:RefreshOverlay()
             end
+            if PK.profFrameReady and PK.UpdateSpecTreeHighlights then
+                C_Timer.After(0.5, function()
+                    PK:UpdateSpecTreeHighlights()
+                end)
+            end
+            -- Broadcast delta to guild after scan
+            PK:SeedOwnData()
+            PK:BroadcastDelta()
+        end)
+
+    elseif event == "TRADE_SKILL_LIST_UPDATE" then
+        -- Profession data has fully loaded -- good time for deep scan
+        C_Timer.After(0.5, function()
+            PK:DeepScanCurrentProfession()
+            if PK.profFrameReady and PK.RefreshOverlay then
+                PK:RefreshOverlay()
+            end
+            if PK.profFrameReady and PK.UpdateSpecTreeHighlights then
+                C_Timer.After(0.5, function()
+                    PK:UpdateSpecTreeHighlights()
+                end)
+            end
+            -- Broadcast delta to guild after scan
+            PK:SeedOwnData()
+            PK:BroadcastDelta()
         end)
 
     elseif event == "TRAIT_CONFIG_UPDATED" then
@@ -551,13 +669,29 @@ f:SetScript("OnEvent", function(_, event, name)
             if PK.profFrameReady and PK.RefreshOverlay then
                 PK:RefreshOverlay()
             end
+            if PK.profFrameReady and PK.UpdateSpecTreeHighlights then
+                C_Timer.After(0.5, function()
+                    PK:UpdateSpecTreeHighlights()
+                end)
+            end
+            -- Broadcast delta to guild after scan
+            PK:SeedOwnData()
+            PK:BroadcastDelta()
         end)
 
     elseif event == "SKILL_LINES_CHANGED" then
         -- Profession data loaded/changed
         C_Timer.After(2, function()
             PK:ScanAllProfessions()
+            PK:SeedOwnData()
+            PK:BroadcastDelta()
         end)
+
+    elseif event == "GUILD_ROSTER_UPDATE" then
+        -- Guild roster changed — prune departed members
+        if PK.guildKey then
+            PK:PruneGuildRoster()
+        end
     end
 end)
 
@@ -569,3 +703,4 @@ f:RegisterEvent("TRADE_SKILL_SHOW")
 pcall(f.RegisterEvent, f, "TRADE_SKILL_LIST_UPDATE")
 pcall(f.RegisterEvent, f, "TRAIT_CONFIG_UPDATED")
 pcall(f.RegisterEvent, f, "SKILL_LINES_CHANGED")
+pcall(f.RegisterEvent, f, "GUILD_ROSTER_UPDATE")
