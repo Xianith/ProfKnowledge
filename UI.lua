@@ -217,10 +217,10 @@ function PK:CreateSummaryWindow()
     end)
     UIDropDownMenu_SetText(profDropdown, "All Professions")
 
-    -- Adjust the Inset: top below title bar, bottom leaves room for sync bar
+    -- Adjust the Inset: top below title bar, bottom leaves room for subtitle + sync bar
     frame.Inset:ClearAllPoints()
     frame.Inset:SetPoint("TOPLEFT", frame, "TOPLEFT", 4, -60)
-    frame.Inset:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -6, 30)
+    frame.Inset:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -6, 46)
 
     -- -- Book/parchment background texture inside the Inset
     -- local bookBg = frame.Inset:CreateTexture(nil, "BACKGROUND", nil, 1)
@@ -229,9 +229,9 @@ function PK:CreateSummaryWindow()
     -- bookBg:SetTexCoord(0, 1, 0.02, 1)
     -- frame.bookBg = bookBg
 
-    -- Subtitle (character count) — inside the Inset
+    -- Subtitle (character count) — bottom of frame, above sync bar
     local subtitle = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    subtitle:SetPoint("TOPLEFT", frame.Inset, "TOPLEFT", 8, -4)
+    subtitle:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 12, 28)
     subtitle:SetTextColor(0.6, 0.6, 0.6)
     frame.subtitle = subtitle
 
@@ -2018,6 +2018,17 @@ function PK:CreateProfessionsBookButton()
     end)
 
     bookFrame.pkTab = tab
+
+    -- Close ProfKnowledge when the Professions Book closes
+    if not bookFrame.pkCloseHooked then
+        bookFrame.pkCloseHooked = true
+        bookFrame:HookScript("OnHide", function()
+            if summaryFrame and summaryFrame:IsShown() then
+                summaryFrame:Hide()
+            end
+        end)
+    end
+
     PK:Debug("PK tab added to ProfessionsBookFrame")
 end
 
