@@ -1273,13 +1273,16 @@ function PK:RefreshOverlay()
         PK:Debug("  Guild roster has " .. rcount .. " entries")
     end
 
-    -- Filter out characters with 0 points spent (skip current char from filter)
+    -- Filter out current character and characters with 0 points spent
+    local currentKey = self.charKey
     local filtered = {}
     for _, entry in ipairs(chars) do
-        local spent = entry.profData.totalKnowledgeSpent or 0
-        local unspent = entry.profData.unspentKnowledge or 0
-        if spent > 0 or unspent > 0 then
-            table.insert(filtered, entry)
+        if entry.charKey ~= currentKey then
+            local spent = entry.profData.totalKnowledgeSpent or 0
+            local unspent = entry.profData.unspentKnowledge or 0
+            if spent > 0 or unspent > 0 then
+                table.insert(filtered, entry)
+            end
         end
     end
     chars = filtered
@@ -1298,11 +1301,9 @@ function PK:RefreshOverlay()
     local yOffset = 0
     local ROW_HEIGHT = 16
     local TAB_ROW_HEIGHT = 14
-    local currentKey = self.charKey
 
     for charIdx, entry in ipairs(chars) do
         local classColor = PK.ClassColors[entry.className] or "|cffffffff"
-        local isCurrentChar = (entry.charKey == currentKey)
         local displayCharName = entry.charKey:match("^(.-)%-") or entry.charKey
 
         -- Character header
@@ -1310,11 +1311,7 @@ function PK:RefreshOverlay()
         nameText:SetPoint("TOPLEFT", 0, yOffset)
         nameText:SetWidth(140)
         nameText:SetJustifyH("LEFT")
-        if isCurrentChar then
-            nameText:SetText(classColor .. displayCharName .. "|r |cff666666*|r")
-        else
-            nameText:SetText(classColor .. displayCharName .. "|r")
-        end
+        nameText:SetText(classColor .. displayCharName .. "|r")
         table.insert(overlayFrame.contentChildren, nameText)
 
         -- Overall spent/unspent on same row
@@ -1745,36 +1742,39 @@ function PK:UpdateSpecTreeHighlights()
                                 if not self.pkAltData then return end
                                 if not GameTooltip:IsShown() then return end
 
-                                GameTooltip:AddLine(" ")
-                                GameTooltip:AddLine("|cff00ccffAlt Knowledge:|r")
                                 local currentKey = PK.charKey
+                                -- Collect alt lines first, then only show header if non-empty
+                                local altLines = {}
                                 for _, alt in ipairs(self.pkAltData) do
-                                    -- Skip the current character
                                     if alt.charKey ~= currentKey then
-                                    local cc = PK.ClassColors[alt.className] or "|cffffffff"
-                                    local name = alt.charKey:match("^(.-)%-") or alt.charKey
-                                    -- Adjust for free unlock rank so displayed values
-                                    -- are divisible by 5 (Blizzard reports maxRanks+1)
-                                    local displayMax = alt.maxRanks
-                                    local displayRank = alt.rank
-                                    if displayMax % 5 ~= 0 then
-                                        displayMax = displayMax - 1
-                                        displayRank = math.max(displayRank - 1, 0)
+                                        local cc = PK.ClassColors[alt.className] or "|cffffffff"
+                                        local name = alt.charKey:match("^(.-)%-") or alt.charKey
+                                        local displayMax = alt.maxRanks
+                                        local displayRank = alt.rank
+                                        if displayMax % 5 ~= 0 then
+                                            displayMax = displayMax - 1
+                                            displayRank = math.max(displayRank - 1, 0)
+                                        end
+                                        local rankColor
+                                        if displayRank >= displayMax then
+                                            rankColor = "|cff00ff00"
+                                        elseif displayRank > 0 then
+                                            rankColor = "|cffffd700"
+                                        else
+                                            rankColor = "|cff555555"
+                                        end
+                                        table.insert(altLines, {
+                                            left  = cc .. name .. "|r",
+                                            right = rankColor .. displayRank .. "/" .. displayMax .. "|r",
+                                        })
                                     end
-                                    local rankColor
-                                    if displayRank >= displayMax then
-                                        rankColor = "|cff00ff00"   -- green = maxed
-                                    elseif displayRank > 0 then
-                                        rankColor = "|cffffd700"   -- gold  = partial
-                                    else
-                                        rankColor = "|cff555555"
+                                end
+                                if #altLines > 0 then
+                                    GameTooltip:AddLine(" ")
+                                    GameTooltip:AddLine("|cff00ccffAlt Knowledge:|r")
+                                    for _, line in ipairs(altLines) do
+                                        GameTooltip:AddDoubleLine(line.left, line.right, 1, 1, 1)
                                     end
-                                    GameTooltip:AddDoubleLine(
-                                        cc .. name .. "|r",
-                                        rankColor .. displayRank .. "/" .. displayMax .. "|r",
-                                        1, 1, 1
-                                    )
-                                    end  -- if not current char
                                 end
                                 GameTooltip:Show()
                             end)
