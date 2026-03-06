@@ -754,7 +754,7 @@ function PK:ShowCellTooltip(btn, charKey, skillLineID, profData)
     GameTooltip:SetOwner(btn, "ANCHOR_RIGHT")
 
     local classColor = "|cffffffff"
-    local charData = self.db and self.db.characters and self.db.characters[charKey]
+    local charData = self:FindCharacterData(charKey)
     if charData then
         classColor = PK.ClassColors[charData.className] or classColor
     end
@@ -891,8 +891,8 @@ function PK:RefreshDetailPanel(charKey, skillLineID)
     end
     scrollChild.children = {}
 
-    -- Get character data
-    local charData = self.db and self.db.characters and self.db.characters[charKey]
+    -- Get character data (local or guild roster)
+    local charData = self:FindCharacterData(charKey)
     if not charData then
         detailFrame.title:SetText("|cffff0000Character Not Found|r")
         detailFrame.subtitle:SetText("")
@@ -1222,6 +1222,16 @@ function PK:RefreshOverlay()
         end
     end
 
+    -- Merge guild roster characters (non-local, deduplicated)
+    local guildChars = self:GetGuildCharactersForProfession(skillLineID)
+    local seen = {}
+    for _, c in ipairs(chars) do seen[c.charKey] = true end
+    for _, gc in ipairs(guildChars) do
+        if not seen[gc.charKey] and not gc.isLocal then
+            table.insert(chars, gc)
+        end
+    end
+
     -- Filter out characters with 0 points spent (skip current char from filter)
     local filtered = {}
     for _, entry in ipairs(chars) do
@@ -1352,43 +1362,60 @@ local cachedProfVariantID = nil
 --- for a given base profession, optionally filtered to a specific expansion variant.
 function PK:BuildAltNodeLookup(baseSkillLineID, filterVariantID)
     local lookup = {}
-    if not self.db or not self.db.characters then return lookup end
+    if not self.db then return lookup end
 
-    for charKey, charData in pairs(self.db.characters) do
-        do
-            local profData = charData.professions and charData.professions[baseSkillLineID]
-            if profData and profData.tabs then
-                -- Only include data from matching expansion variant (e.g. Midnight vs TWW).
-                -- If the stored data has no variantID (legacy / imported), treat as wildcard match.
-                local variantMatch = (not filterVariantID)
-                    or (not profData.variantID)
-                    or (profData.variantID == filterVariantID)
-                    or (profData.skillLineID and profData.skillLineID == filterVariantID)
-                if not variantMatch then
-                    PK:Debug("BuildAltNodeLookup: skipping " .. charKey
-                        .. " variant=" .. tostring(profData.variantID)
-                        .. " (want " .. tostring(filterVariantID) .. ")")
-                end
-                if variantMatch then
-                    for _, tabData in pairs(profData.tabs) do
-                        if tabData.nodes then
-                            for _, node in ipairs(tabData.nodes) do
-                                if node.name and node.currentRank and node.currentRank > 0 then
-                                    local key = node.name:lower()
-                                    if not lookup[key] then
-                                        lookup[key] = {}
-                                    end
-                                    table.insert(lookup[key], {
-                                        charKey   = charKey,
-                                        className = charData.className,
-                                        rank      = node.currentRank,
-                                        maxRanks  = node.maxRanks,
-                                    })
+    -- Helper to process one character's data into the lookup
+    local seen = {}
+    local function processChar(charKey, charData)
+        if seen[charKey] then return end
+        seen[charKey] = true
+        local profData = charData.professions and charData.professions[baseSkillLineID]
+        if profData and profData.tabs then
+            local variantMatch = (not filterVariantID)
+                or (not profData.variantID)
+                or (profData.variantID == filterVariantID)
+                or (profData.skillLineID and profData.skillLineID == filterVariantID)
+            if not variantMatch then
+                PK:Debug("BuildAltNodeLookup: skipping " .. charKey
+                    .. " variant=" .. tostring(profData.variantID)
+                    .. " (want " .. tostring(filterVariantID) .. ")")
+            end
+            if variantMatch then
+                for _, tabData in pairs(profData.tabs) do
+                    if tabData.nodes then
+                        for _, node in ipairs(tabData.nodes) do
+                            if node.name and node.currentRank and node.currentRank > 0 then
+                                local key = node.name:lower()
+                                if not lookup[key] then
+                                    lookup[key] = {}
                                 end
+                                table.insert(lookup[key], {
+                                    charKey   = charKey,
+                                    className = charData.className,
+                                    rank      = node.currentRank,
+                                    maxRanks  = node.maxRanks,
+                                })
                             end
                         end
                     end
                 end
+            end
+        end
+    end
+
+    -- Scan local characters
+    if self.db.characters then
+        for charKey, charData in pairs(self.db.characters) do
+            processChar(charKey, charData)
+        end
+    end
+
+    -- Scan guild roster characters
+    local roster = self:GetGuildRoster()
+    if roster then
+        for charKey, entry in pairs(roster) do
+            if not entry.isLocal then
+                processChar(charKey, entry)
             end
         end
     end

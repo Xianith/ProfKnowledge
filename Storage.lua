@@ -132,6 +132,20 @@ function PK:GetCharacterData(charKey)
     return self.db.characters[charKey]
 end
 
+--- Look up character data from local characters first, then guild roster.
+--- Returns the data table (or nil) so callers don't need to know the source.
+function PK:FindCharacterData(charKey)
+    -- Try local characters first
+    local data = self:GetCharacterData(charKey)
+    if data then return data end
+    -- Fall back to guild roster
+    local roster = self:GetGuildRoster()
+    if roster and roster[charKey] then
+        return roster[charKey]
+    end
+    return nil
+end
+
 function PK:GetCurrentCharacterData()
     return self:GetCharacterData(self.charKey)
 end
