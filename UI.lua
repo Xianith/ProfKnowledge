@@ -327,10 +327,13 @@ function PK:CreateSummaryWindow()
                     table.insert(sorted, name)
                 end
                 table.sort(sorted)
+                local showRoles = PK:GetSetting("debug")
                 for i, name in ipairs(sorted) do
                     local role = ""
-                    if i == 1 then role = " |cffffd700(DR)|r" end
-                    if i == 2 then role = " |cffaaaaaa(BDR)|r" end
+                    if showRoles then
+                        if i == 1 then role = " |cffffd700(DR)|r" end
+                        if i == 2 then role = " |cffaaaaaa(BDR)|r" end
+                    end
                     local isMe = (name == UnitName("player"))
                     local color = isMe and "|cff00ff00" or "|cffffffff"
                     GameTooltip:AddLine("  " .. color .. name .. "|r" .. role)
@@ -374,11 +377,13 @@ function PK:RefreshSyncStatus()
         if count > 0 then
             syncIcon:SetText("|TInterface\\COMMON\\Indicator-Green:0|t")
             local userLabel = count == 1 and "user" or "users"
-            syncText:SetText("|cff00ff00" .. count .. "|r addon " .. userLabel .. " online"
+            local statusStr = "|cff00ff00" .. count .. "|r addon " .. userLabel .. " online"
                 .. "  |cff888888·|r  "
                 .. rosterCount .. " guild chars tracked"
-                .. "  |cff888888·|r  "
-                .. "|cff888888" .. role .. "|r")
+            if PK:GetSetting("debug") then
+                statusStr = statusStr .. "  |cff888888·|r  |cff888888" .. role .. "|r"
+            end
+            syncText:SetText(statusStr)
         else
             syncIcon:SetText("|TInterface\\COMMON\\Indicator-Yellow:0|t")
             syncText:SetText("Waiting for guild members...")

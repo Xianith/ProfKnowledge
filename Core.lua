@@ -36,7 +36,14 @@ local BROADCAST_COOLDOWN = 5   -- seconds to wait after last event
 
 --- Schedule a SeedOwnData + BroadcastDelta, debounced.
 --- Multiple calls within BROADCAST_COOLDOWN collapse into one.
+--- Only broadcasts when PK summary or the profession spec page is open.
 function PK:ScheduleBroadcast()
+    -- Only sync when relevant UI is visible
+    local pkFrame = ProfKnowledgeSummaryFrame
+    local pkOpen = pkFrame and pkFrame:IsShown()
+    local specOpen = ProfessionsFrame and ProfessionsFrame:IsShown()
+    if not pkOpen and not specOpen then return end
+
     if pendingBroadcast then
         pendingBroadcast:Cancel()
     end
