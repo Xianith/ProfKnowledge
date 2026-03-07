@@ -217,10 +217,10 @@ function PK:CreateSummaryWindow()
     end)
     UIDropDownMenu_SetText(profDropdown, "All Professions")
 
-    -- Adjust the Inset: top below title bar, bottom leaves room for subtitle + sync bar
+    -- Adjust the Inset: top below title bar, bottom leaves room for sync bar
     frame.Inset:ClearAllPoints()
     frame.Inset:SetPoint("TOPLEFT", frame, "TOPLEFT", 4, -60)
-    frame.Inset:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -6, 46)
+    frame.Inset:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -6, 30)
 
     -- -- Book/parchment background texture inside the Inset
     -- local bookBg = frame.Inset:CreateTexture(nil, "BACKGROUND", nil, 1)
@@ -229,16 +229,16 @@ function PK:CreateSummaryWindow()
     -- bookBg:SetTexCoord(0, 1, 0.02, 1)
     -- frame.bookBg = bookBg
 
-    -- Subtitle (character count) — bottom of frame, above sync bar
+    -- Subtitle (character count) — bottom of the Inset, above sync bar
     local subtitle = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    subtitle:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 12, 28)
-    subtitle:SetTextColor(0.6, 0.6, 0.6)
+    subtitle:SetPoint("BOTTOMLEFT", frame.Inset, "BOTTOMLEFT", 8, 4)
+    subtitle:SetTextColor(0.5, 0.5, 0.5)
     frame.subtitle = subtitle
 
     -- Hint text
     local hint = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     hint:SetPoint("LEFT", subtitle, "RIGHT", 10, 0)
-    hint:SetTextColor(0.45, 0.45, 0.45)
+    hint:SetTextColor(0.4, 0.4, 0.4)
     hint:SetText("Click a cell for details")
     frame.hint = hint
 
@@ -255,7 +255,7 @@ function PK:CreateSummaryWindow()
     -- Scroll frame for grid rows (inside the Inset)
     local scrollFrame = CreateFrame("ScrollFrame", nil, frame.Inset, "UIPanelScrollFrameTemplate")
     scrollFrame:SetPoint("TOPLEFT", frame.Inset, "TOPLEFT", 4, -42)
-    scrollFrame:SetPoint("BOTTOMRIGHT", frame.Inset, "BOTTOMRIGHT", -24, 4)
+    scrollFrame:SetPoint("BOTTOMRIGHT", frame.Inset, "BOTTOMRIGHT", -24, 18)
     frame.scrollFrame = scrollFrame
 
     local scrollChild = CreateFrame("Frame", nil, scrollFrame)
@@ -414,15 +414,20 @@ local function FormatProfCell(profData, showShortName)
 
     local prefix = ""
     if showShortName then
-        local shortName = PK.ProfessionShortNames[profData.baseSkillLineID or 0]
-            or PK.ProfessionShortNames[profData.skillLineID or 0]
+        -- Small circular profession icon
+        local baseID = profData.baseSkillLineID or profData.skillLineID or 0
+        local profInfo = PK.ProfessionData[baseID]
+        if profInfo and profInfo.icon then
+            prefix = "|T" .. profInfo.icon .. ":14:14:0:0:64:64:4:60:4:60|t "
+        end
+
+        local shortName = PK.ProfessionShortNames[baseID]
         if not shortName then
-            -- Try to derive short name from the full name
             local name = profData.name or ""
             shortName = name:sub(1, 4)
         end
         if shortName and shortName ~= "" then
-            prefix = "|cffaaaaaa" .. shortName .. "|r "
+            prefix = prefix .. "|cffaaaaaa" .. shortName .. "|r "
         end
     end
 
@@ -539,7 +544,7 @@ function PK:RefreshSummaryWindow()
     -- Col 3: Cooking (185)
     -- Col 4: Fishing (356)
     local NAME_COL_WIDTH   = 130
-    local MAIN_COL_WIDTH   = 110   -- wider to fit "Ench 40/45"
+    local MAIN_COL_WIDTH   = 130   -- wider to fit icon + "Ench 40/45"
     local SEC_COL_WIDTH    = 70
     local DEL_COL_WIDTH    = 22
     local ROW_HEIGHT       = 22
@@ -611,11 +616,25 @@ function PK:RefreshSummaryWindow()
     end
 
     local yOffset = -4
+    local separatorDrawn = false
 
     for rowIdx, char in ipairs(chars) do
         local classColor = PK.ClassColors[char.className] or "|cffffffff"
         local isCurrentChar = (char.charKey == self.charKey)
         local isGuild = char.isGuild
+
+        -- Draw separator between local and guild sections
+        if isGuild and not separatorDrawn then
+            separatorDrawn = true
+            yOffset = yOffset - 4
+            local sep = scrollChild:CreateTexture(nil, "ARTWORK")
+            sep:SetHeight(1)
+            sep:SetPoint("TOPLEFT", 4, yOffset)
+            sep:SetPoint("TOPRIGHT", -4, yOffset)
+            sep:SetColorTexture(0.35, 0.35, 0.35, 0.6)
+            table.insert(scrollChild.children, sep)
+            yOffset = yOffset - 4
+        end
 
         -- Character name
         local nameText = scrollChild:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -625,7 +644,7 @@ function PK:RefreshSummaryWindow()
         local displayName = char.charKey:match("^(.-)%-") or char.charKey
         local nameStr
         if isGuild then
-            nameStr = "|cff999999" .. displayName .. "|r |cff666666(G)|r"
+            nameStr = classColor .. displayName .. "|r |cff666666(G)|r"
         else
             nameStr = classColor .. displayName .. "|r"
             if isCurrentChar then
