@@ -1,3 +1,18 @@
+## v0.2.1 — Options Panel & Overlay Fix
+
+### New Features
+- Options panel accessible from the sync bar (replaces Import/Export buttons)
+- Toggle for Node Overlay (spec tree highlights) — enable/disable colored circles on specialization nodes
+- Toggle for Alt Knowledge Panel — show/hide the side panel on the spec tree
+- Toggle for Guild Sync — enable/disable guild data sharing
+- Import and Export buttons moved into the Options panel
+
+### Bug Fixes
+- Fixed node overlay not rendering due to variable scoping issue — highlights now display correctly and the toggle works as expected
+- Fixed "attempt to index global 'orderMap'" error when exporting guild data
+
+---
+
 ## v0.2.0 — UI Polish, Performance & Sync Fixes
 
 ### Summary Window

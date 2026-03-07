@@ -1561,26 +1561,45 @@ function PK:UpdateSpecTreeHighlights()
     local specPage = ProfessionsFrame and ProfessionsFrame.SpecPage
     if not specPage or not specPage:IsShown() then return end
 
-    -- When overlay is disabled, use empty cache to clear all highlights
+    -- When overlay is disabled, clear all existing highlights and return
     if PK:GetSetting("showOverlay") == false then
         cachedAltNodeData   = {}
         cachedProfBaseID    = nil
         cachedProfVariantID = nil
-    else
-        local baseID, variantID = self:GetSpecPageProfessionIDs()
-        if not baseID or not variantID then
-            PK:Debug("Spec highlights: no profession IDs found")
-            return
+        local buttons = CollectNodeButtons()
+        for _, button in ipairs(buttons) do
+            if button.pkHighlight then button.pkHighlight:Hide() end
+            if button.pkRankText then
+                button.pkRankText:Hide()
+                if button.pkRankShadows then
+                    for _, shadow in ipairs(button.pkRankShadows) do shadow:Hide() end
+                end
+            end
+            if button.pkOrangeText then
+                button.pkOrangeText:Hide()
+                if button.pkOrangeShadows then
+                    for _, shadow in ipairs(button.pkOrangeShadows) do shadow:Hide() end
+                end
+            end
+            if button.pkBlizzRankText then button.pkBlizzRankText:Show() end
+            button.pkAltData = nil
         end
+        return
+    end
 
-        -- Rebuild the cache when the profession or expansion variant changes
-        if baseID ~= cachedProfBaseID or variantID ~= cachedProfVariantID then
-            cachedAltNodeData   = self:BuildAltNodeLookup(baseID, variantID)
-            cachedProfBaseID    = baseID
-            cachedProfVariantID = variantID
-            PK:Debug("Spec highlights: rebuilt cache for baseID "
-                .. tostring(baseID) .. " variant " .. tostring(variantID))
-        end
+    local baseID, variantID = self:GetSpecPageProfessionIDs()
+    if not baseID or not variantID then
+        PK:Debug("Spec highlights: no profession IDs found")
+        return
+    end
+
+    -- Rebuild the cache when the profession or expansion variant changes
+    if baseID ~= cachedProfBaseID or variantID ~= cachedProfVariantID then
+        cachedAltNodeData   = self:BuildAltNodeLookup(baseID, variantID)
+        cachedProfBaseID    = baseID
+        cachedProfVariantID = variantID
+        PK:Debug("Spec highlights: rebuilt cache for baseID "
+            .. tostring(baseID) .. " variant " .. tostring(variantID))
     end
 
     -- Obtain the configID for this variant so we can resolve node names
