@@ -297,12 +297,10 @@ function PK:CreateSummaryWindow()
     syncText:SetJustifyH("LEFT")
     frame.syncText = syncText
 
-    -- Click to force sync
+    -- Click to trigger manual sync (respects cooldown)
     syncBar:SetScript("OnClick", function()
-        if PK.commReady then
-            PK.syncPending = false
-            PK:RequestSync()
-            PK:Print("Sync requested.")
+        if PK.commReady and PK.TriggerManualSync then
+            PK:TriggerManualSync()
             PK:RefreshSyncStatus()
         else
             PK:Print("Guild sync is not active.")
@@ -313,7 +311,19 @@ function PK:CreateSummaryWindow()
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
         GameTooltip:AddLine("|cff00ccffGuild Sync|r")
         if PK.commReady then
-            GameTooltip:AddLine("Click to force sync with guild", 1, 1, 1, true)
+            -- Show cooldown status
+            local COOLDOWN = 300
+            local lastSync = PK._lastManualSync or 0
+            local elapsed = time() - lastSync
+            if elapsed < COOLDOWN then
+                local remaining = COOLDOWN - elapsed
+                local mins = math.floor(remaining / 60)
+                local secs = remaining % 60
+                GameTooltip:AddLine("Sync on cooldown: " .. mins .. "m " .. secs .. "s", 1, 0.5, 0, true)
+            else
+                GameTooltip:AddLine("Click to sync with guild", 0, 1, 0, true)
+            end
+
             local count = PK.GetAddonUserCount and PK:GetAddonUserCount() or 0
             if count > 0 then
                 GameTooltip:AddLine(" ")
@@ -2232,7 +2242,7 @@ function PK:CreateOptionsPanel()
     end)
 
     -- Version label
-    local version = GetAddOnMetadata("ProfKnowledge", "Version") or "?"
+    local version = PK.version or "?"
     local verText = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     verText:SetPoint("BOTTOMRIGHT", -12, 10)
     verText:SetText("v" .. version)

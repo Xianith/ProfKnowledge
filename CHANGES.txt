@@ -1,3 +1,15 @@
+## v0.3.1 — UI & Sync Polish
+
+### Bug Fixes
+- Fixed version number not displaying in the Options panel (was using deprecated API)
+- Sync bar button now respects the 5-minute cooldown (uses TriggerManualSync instead of raw RequestSync)
+
+### Improvements
+- Sync bar tooltip now shows cooldown timer when sync is on cooldown ("Sync on cooldown: Xm Ys")
+- Tooltip shows "Click to sync with guild" when cooldown has expired
+
+---
+
 ## v0.3.0 — Sync Overhaul
 
 ### Sync Changes

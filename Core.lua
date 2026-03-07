@@ -31,7 +31,7 @@ PK.profFrameReady = false
 -- Manual sync trigger — only fires when PK or spec page is opened
 ----------------------------------------------------------------------
 
-local lastManualSync = 0
+PK._lastManualSync = 0
 local MANUAL_SYNC_COOLDOWN = 300  -- 5 minutes between manual syncs
 
 --- Trigger a one-shot sync exchange when the user opens the addon UI.
@@ -42,11 +42,11 @@ function PK:TriggerManualSync()
     if PK:GetSetting("guildSync") == false then return end
 
     local now = time()
-    if (now - lastManualSync) < MANUAL_SYNC_COOLDOWN then
-        PK:Debug("Manual sync skipped — cooldown (" .. (MANUAL_SYNC_COOLDOWN - (now - lastManualSync)) .. "s remaining)")
+    if (now - self._lastManualSync) < MANUAL_SYNC_COOLDOWN then
+        PK:Debug("Manual sync skipped — cooldown (" .. (MANUAL_SYNC_COOLDOWN - (now - self._lastManualSync)) .. "s remaining)")
         return
     end
-    lastManualSync = now
+    self._lastManualSync = now
 
     -- Re-activate sync temporarily
     self.syncActive = true
