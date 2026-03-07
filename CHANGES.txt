@@ -1,3 +1,19 @@
+## v0.3.0 — Sync Overhaul
+
+### Sync Changes
+- Sync now performs one full exchange on login, then goes completely silent — no background traffic
+- All sync timers (heartbeat, heartbeat monitor, retry) are stopped after the initial sync completes
+- Opening the PK window or Professions page triggers a manual sync (5-minute cooldown)
+- All incoming messages are ignored when sync is inactive — zero processing when idle
+- BroadcastDelta now sends ALL local characters, not just the current one
+- Guild members receive your entire alt roster in a single sync exchange
+- Version-vector merge uses per-character lastUpdate timestamps — newer data always wins
+
+### Other
+- Added version number to the Options panel (bottom right)
+
+---
+
 ## v0.2.2 — Spec Tree Overlay Cleanup
 
 ### Bug Fixes

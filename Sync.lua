@@ -158,11 +158,30 @@ function PK:GetAddonUserCount()
 end
 
 ----------------------------------------------------------------------
+-- Sync active flag — when false, incoming messages are ignored
+----------------------------------------------------------------------
+
+PK.syncActive = false      -- true only during login sync or manual sync
+PK.loginSyncDone = false   -- set true after the initial login sync completes
+
+--- Shut down all periodic sync machinery (heartbeat, monitors, timers).
+function PK:StopAllSyncTimers()
+    self:StopHeartbeat()
+    self:StopHeartbeatMonitor()
+    if self.syncTimer then
+        self.syncTimer:Cancel()
+        self.syncTimer = nil
+    end
+    self.syncPending = false
+end
+
+----------------------------------------------------------------------
 -- Login / initialization flow
 ----------------------------------------------------------------------
 
 --- Called after PLAYER_LOGIN + InitComm succeeds.
---- Kicks off the HELLO → SYNC_REQ flow.
+--- Runs ONE full sync on login: HELLO → SYNC_REQ → done.
+--- After the initial sync completes, all timers are stopped.
 function PK:StartSync()
     if not self.commReady then return end
     if not self:UpdateGuildInfo() then
@@ -177,6 +196,9 @@ function PK:StartSync()
     local myName = UnitName("player")
     self.addonUsers[myName] = time()
 
+    -- Activate sync for the login exchange
+    self.syncActive = true
+
     -- Broadcast HELLO after a short delay
     C_Timer.After(HELLO_DELAY, function()
         PK:BroadcastHello()
@@ -187,9 +209,26 @@ function PK:StartSync()
         end)
     end)
 
-    -- Start heartbeat monitoring
+    -- Start heartbeat monitoring (will be stopped after sync completes)
     self:StartHeartbeatMonitor()
     self:ElectRoles()
+
+    -- Safety net: after 60s, shut down sync regardless of outcome
+    C_Timer.After(60, function()
+        if PK.syncActive and not PK.loginSyncDone then
+            PK:Debug("Login sync safety timeout — shutting down sync")
+            PK:FinishLoginSync()
+        end
+    end)
+end
+
+--- Called when the login sync is finished (either completed or timed out).
+--- Shuts down all periodic timers to eliminate background traffic.
+function PK:FinishLoginSync()
+    self.loginSyncDone = true
+    self.syncActive = false
+    self:StopAllSyncTimers()
+    PK:Debug("Login sync finished — all sync timers stopped")
 end
 
 ----------------------------------------------------------------------
@@ -198,6 +237,7 @@ end
 
 function PK:BroadcastHello()
     if not self.commReady then return end
+    if not self.syncActive then return end
     self:SendGuildMessage(PK.MSG_HELLO, {
         charKey = self.charKey,
     })
@@ -209,6 +249,7 @@ end
 
 function PK:RequestSync()
     if not self.commReady then return end
+    if not self.syncActive then return end
     if self.syncPending then return end
 
     self.syncPending = true
@@ -244,6 +285,10 @@ function PK:OnSyncTimeout()
     if self.syncRetryCount >= SYNC_MAX_RETRIES then
         PK:Debug("Sync failed after " .. SYNC_MAX_RETRIES .. " retries")
         self.syncPending = false
+        -- If this was the login sync, shut down gracefully
+        if not self.loginSyncDone then
+            PK:FinishLoginSync()
+        end
         return
     end
 
@@ -275,23 +320,27 @@ end
 -- DELTA — broadcast incremental update after local scan
 ----------------------------------------------------------------------
 
---- Called after a local profession scan completes.
---- Broadcasts the current character's data as a delta update.
+--- Broadcast ALL local characters as delta updates.
+--- Sends one DELTA message per character so guild members get our full roster.
 function PK:BroadcastDelta()
     if not self.commReady then return end
+    if not self.syncActive then return end
     if not self.guildKey then return end
+    if not self.db or not self.db.characters then return end
 
-    local charData = self:GetCurrentCharacterData()
-    if not charData then return end
-
-    -- Build a stripped-down copy for transmission
-    local stripped = self:StripForSync(charData)
-
-    self:SendGuildMessage(PK.MSG_DELTA, {
-        charKey  = self.charKey,
-        data     = stripped,
-        guildKey = self.guildKey,
-    })
+    local count = 0
+    for charKey, charData in pairs(self.db.characters) do
+        local stripped = self:StripForSync(charData)
+        if stripped then
+            self:SendGuildMessage(PK.MSG_DELTA, {
+                charKey  = charKey,
+                data     = stripped,
+                guildKey = self.guildKey,
+            })
+            count = count + 1
+        end
+    end
+    PK:Debug("Broadcast delta for " .. count .. " local character(s)")
 end
 
 ----------------------------------------------------------------------
@@ -396,6 +445,8 @@ end
 local HELLO_COOLDOWN = 30  -- don't reply to HELLO more than once per 30s
 local lastHelloReply = 0
 local function OnHello(self, sender, payload, distribution)
+    if not self.syncActive then return end
+
     self.addonUsers[sender] = time()
     self:ElectRoles()
 
@@ -405,7 +456,7 @@ local function OnHello(self, sender, payload, distribution)
         lastHelloReply = now
         local jitter = 0.5 + math.random() * 3.5
         C_Timer.After(jitter, function()
-            if PK.commReady then
+            if PK.commReady and PK.syncActive then
                 PK:SendGuildMessage(PK.MSG_HELLO, {
                     charKey = PK.charKey,
                 })
@@ -416,11 +467,14 @@ end
 
 --- HEARTBEAT handler: DR is alive.
 local function OnHeartbeat(self, sender, payload, distribution)
+    if not self.syncActive then return end
     self.addonUsers[sender] = time()
 end
 
 --- SYNC_REQ handler: someone wants to sync (DR/BDR responds).
 local function OnSyncReq(self, sender, payload, distribution)
+    if not self.syncActive then return end
+
     -- Only DR responds (or BDR on retry)
     if self.syncRole ~= "DR" and self.syncRole ~= "BDR" then
         return
@@ -504,6 +558,7 @@ end
 
 --- SYNC_RESP handler: DR sent us data we were missing.
 local function OnSyncResp(self, sender, payload, distribution)
+    if not self.syncActive then return end
     if not self.syncPending then return end
 
     local data = payload.data or {}
@@ -529,11 +584,17 @@ local function OnSyncResp(self, sender, payload, distribution)
             self.syncTimer = nil
         end
         PK:Debug("Sync complete")
+
+        -- If this was the login sync, shut down all background sync
+        if not self.loginSyncDone then
+            PK:FinishLoginSync()
+        end
     end
 end
 
 --- SYNC_PULL handler: DR wants data from us.
 local function OnSyncPull(self, sender, payload, distribution)
+    if not self.syncActive then return end
     local keys = payload.keys or {}
     if #keys == 0 then return end
 
@@ -554,6 +615,7 @@ end
 
 --- SYNC_PUSH handler: requester sent data we asked for.
 local function OnSyncPush(self, sender, payload, distribution)
+    if not self.syncActive then return end
     local data = payload.data or {}
     local merged = 0
 
@@ -570,6 +632,7 @@ end
 
 --- DELTA handler: incremental update from a guild member.
 local function OnDelta(self, sender, payload, distribution)
+    if not self.syncActive then return end
     local charKey = payload.charKey
     local data = payload.data
     local guildKey = payload.guildKey

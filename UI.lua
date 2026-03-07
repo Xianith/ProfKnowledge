@@ -148,6 +148,10 @@ function PK:ShowSummaryWindow()
     end
     self:RefreshSummaryWindow()
     summaryFrame:Show()
+    -- Trigger a manual sync when the PK window is opened
+    if PK.TriggerManualSync then
+        PK:TriggerManualSync()
+    end
 end
 
 function PK:CreateSummaryWindow()
@@ -2226,6 +2230,12 @@ function PK:CreateOptionsPanel()
         frame:Hide()
         PK:ShowImportWindow()
     end)
+
+    -- Version label
+    local version = GetAddOnMetadata("ProfKnowledge", "Version") or "?"
+    local verText = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    verText:SetPoint("BOTTOMRIGHT", -12, 10)
+    verText:SetText("v" .. version)
 
     frame:Hide()
     return frame

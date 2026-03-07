@@ -789,28 +789,56 @@ function PK:GetGuildRoster()
     return self.db.guildRoster and self.db.guildRoster[self.guildKey]
 end
 
---- Seed the current character's data into the guild roster.
+--- Seed the current character's data into the guild roster,
+--- then seed all other local characters too.
 --- Local player data is always authoritative.
 function PK:SeedOwnData()
     if not self.db or not self.guildKey or not self.charKey then return end
 
+    local roster = self.db.guildRoster[self.guildKey]
+    if not roster then return end
+
+    -- Seed current character
     local charData = self:GetCurrentCharacterData()
-    if not charData then return end
+    if charData then
+        roster[self.charKey] = {
+            className   = charData.className,
+            classID     = charData.classID,
+            level       = charData.level,
+            lastScanned = charData.lastScanned,
+            lastUpdate  = time(),
+            prof1BaseID = charData.prof1BaseID,
+            prof2BaseID = charData.prof2BaseID,
+            professions = charData.professions,
+            isLocal     = true,
+        }
+    end
+
+    -- Seed all other local characters
+    self:SeedAllLocalData()
+end
+
+--- Seed ALL local characters' data into the guild roster.
+--- This ensures we share our entire roster, not just the current character.
+function PK:SeedAllLocalData()
+    if not self.db or not self.guildKey or not self.db.characters then return end
 
     local roster = self.db.guildRoster[self.guildKey]
     if not roster then return end
 
-    roster[self.charKey] = {
-        className   = charData.className,
-        classID     = charData.classID,
-        level       = charData.level,
-        lastScanned = charData.lastScanned,
-        lastUpdate  = time(),
-        prof1BaseID = charData.prof1BaseID,
-        prof2BaseID = charData.prof2BaseID,
-        professions = charData.professions,
-        isLocal     = true,  -- marks this as our own data (never overwritten by sync)
-    }
+    for charKey, charData in pairs(self.db.characters) do
+        roster[charKey] = {
+            className   = charData.className,
+            classID     = charData.classID,
+            level       = charData.level,
+            lastScanned = charData.lastScanned,
+            lastUpdate  = charData.lastScanned or time(),
+            prof1BaseID = charData.prof1BaseID,
+            prof2BaseID = charData.prof2BaseID,
+            professions = charData.professions,
+            isLocal     = true,
+        }
+    end
 end
 
 --- Merge a guild member's data into the roster.

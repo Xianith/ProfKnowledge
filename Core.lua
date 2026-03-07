@@ -28,31 +28,47 @@ PK.charKey        = nil
 PK.profFrameReady = false
 
 ----------------------------------------------------------------------
--- Broadcast debounce — coalesces rapid events into a single sync
+-- Manual sync trigger — only fires when PK or spec page is opened
 ----------------------------------------------------------------------
 
-local pendingBroadcast = nil   -- timer handle
-local BROADCAST_COOLDOWN = 5   -- seconds to wait after last event
+local lastManualSync = 0
+local MANUAL_SYNC_COOLDOWN = 300  -- 5 minutes between manual syncs
 
---- Schedule a SeedOwnData + BroadcastDelta, debounced.
---- Multiple calls within BROADCAST_COOLDOWN collapse into one.
---- Only broadcasts when PK summary or the profession spec page is open.
-function PK:ScheduleBroadcast()
-    -- Only sync when relevant UI is visible
-    local pkFrame = ProfKnowledgeSummaryFrame
-    local pkOpen = pkFrame and pkFrame:IsShown()
-    local specOpen = ProfessionsFrame and ProfessionsFrame:IsShown()
-    if not pkOpen and not specOpen then return end
+--- Trigger a one-shot sync exchange when the user opens the addon UI.
+--- Activates sync, broadcasts data, requests sync, then shuts down after.
+function PK:TriggerManualSync()
+    if not self.commReady then return end
+    if not self.guildKey then return end
+    if PK:GetSetting("guildSync") == false then return end
 
-    if pendingBroadcast then
-        pendingBroadcast:Cancel()
+    local now = time()
+    if (now - lastManualSync) < MANUAL_SYNC_COOLDOWN then
+        PK:Debug("Manual sync skipped — cooldown (" .. (MANUAL_SYNC_COOLDOWN - (now - lastManualSync)) .. "s remaining)")
+        return
     end
-    pendingBroadcast = C_Timer.NewTimer(BROADCAST_COOLDOWN, function()
-        pendingBroadcast = nil
-        PK:SeedOwnData()
-        PK:BroadcastDelta()
-        PK:Debug("Debounced broadcast fired")
+    lastManualSync = now
+
+    -- Re-activate sync temporarily
+    self.syncActive = true
+
+    -- Seed and broadcast our full roster
+    self:SeedOwnData()
+    self:BroadcastDelta()
+
+    -- Request sync from others
+    self.syncPending = false
+    self:RequestSync()
+
+    -- Shut down sync after 30s regardless
+    C_Timer.After(30, function()
+        if PK.syncActive then
+            PK.syncActive = false
+            PK:StopAllSyncTimers()
+            PK:Debug("Manual sync window closed")
+        end
     end)
+
+    PK:Debug("Manual sync triggered")
 end
 
 ----------------------------------------------------------------------
@@ -668,7 +684,8 @@ f:SetScript("OnEvent", function(_, event, name)
                     PK:UpdateSpecTreeHighlights()
                 end)
             end
-            PK:ScheduleBroadcast()
+            -- Trigger a manual sync when the profession page opens
+            PK:TriggerManualSync()
         end)
 
     elseif event == "TRADE_SKILL_LIST_UPDATE" then
@@ -683,7 +700,6 @@ f:SetScript("OnEvent", function(_, event, name)
                     PK:UpdateSpecTreeHighlights()
                 end)
             end
-            PK:ScheduleBroadcast()
         end)
 
     elseif event == "TRAIT_CONFIG_UPDATED" then
@@ -698,14 +714,12 @@ f:SetScript("OnEvent", function(_, event, name)
                     PK:UpdateSpecTreeHighlights()
                 end)
             end
-            PK:ScheduleBroadcast()
         end)
 
     elseif event == "SKILL_LINES_CHANGED" then
         -- Profession data loaded/changed
         C_Timer.After(2, function()
             PK:ScanAllProfessions()
-            PK:ScheduleBroadcast()
         end)
 
     elseif event == "GUILD_ROSTER_UPDATE" then
