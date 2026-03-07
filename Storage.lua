@@ -17,7 +17,8 @@ local DB_DEFAULTS = {
     discoveredVariants = {},  -- Cache: baseSkillLineID → expansion variant ID
     guildRoster = {},         -- { ["GuildName-Realm"] = { ["CharName-Realm"] = entry, ... } }
     settings = {
-        showOverlay  = true,
+        showOverlay  = true,   -- Node highlights on spec tree
+        showAltPanel = true,   -- Alt Knowledge side panel
         showBadges   = true,
         guildSync    = true,   -- Enable guild sync by default
         debug        = false,  -- /pk debug to toggle

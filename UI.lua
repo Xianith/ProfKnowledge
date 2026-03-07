@@ -272,21 +272,13 @@ function PK:CreateSummaryWindow()
 
     -- (no colored background — blends with the frame)
 
-    -- Import / Export buttons (right side of sync bar)
-    local exportBtn = CreateFrame("Button", nil, syncBar, "UIPanelButtonTemplate")
-    exportBtn:SetSize(60, 20)
-    exportBtn:SetPoint("RIGHT", syncBar, "RIGHT", -2, 0)
-    exportBtn:SetText("Export")
-    exportBtn:SetScript("OnClick", function()
-        PK:ShowExportWindow()
-    end)
-
-    local importBtn = CreateFrame("Button", nil, syncBar, "UIPanelButtonTemplate")
-    importBtn:SetSize(60, 20)
-    importBtn:SetPoint("RIGHT", exportBtn, "LEFT", -4, 0)
-    importBtn:SetText("Import")
-    importBtn:SetScript("OnClick", function()
-        PK:ShowImportWindow()
+    -- Options button (right side of sync bar)
+    local optionsBtn = CreateFrame("Button", nil, syncBar, "UIPanelButtonTemplate")
+    optionsBtn:SetSize(70, 20)
+    optionsBtn:SetPoint("RIGHT", syncBar, "RIGHT", -2, 0)
+    optionsBtn:SetText("Options")
+    optionsBtn:SetScript("OnClick", function()
+        PK:ToggleOptionsPanel()
     end)
 
     -- Sync icon (left side)
@@ -294,10 +286,10 @@ function PK:CreateSummaryWindow()
     syncIcon:SetPoint("LEFT", 6, 0)
     frame.syncIcon = syncIcon
 
-    -- Sync text (between icon and import button)
+    -- Sync text (between icon and options button)
     local syncText = syncBar:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     syncText:SetPoint("LEFT", syncIcon, "RIGHT", 4, 0)
-    syncText:SetPoint("RIGHT", importBtn, "LEFT", -8, 0)
+    syncText:SetPoint("RIGHT", optionsBtn, "LEFT", -8, 0)
     syncText:SetJustifyH("LEFT")
     frame.syncText = syncText
 
@@ -378,8 +370,6 @@ function PK:RefreshSyncStatus()
             syncIcon:SetText("|TInterface\\COMMON\\Indicator-Green:0|t")
             local userLabel = count == 1 and "user" or "users"
             local statusStr = "|cff00ff00" .. count .. "|r addon " .. userLabel .. " online"
-                .. "  |cff888888·|r  "
-                .. rosterCount .. " guild chars tracked"
             if PK:GetSetting("debug") then
                 statusStr = statusStr .. "  |cff888888·|r  |cff888888" .. role .. "|r"
             end
@@ -1168,6 +1158,12 @@ end
 function PK:RefreshOverlay()
     if not overlayFrame then return end
 
+    -- Check if Alt Knowledge panel is disabled
+    if PK:GetSetting("showAltPanel") == false then
+        overlayFrame:Hide()
+        return
+    end
+
     local scrollChild = overlayFrame.scrollChild
 
     -- Clean up old content
@@ -1565,19 +1561,26 @@ function PK:UpdateSpecTreeHighlights()
     local specPage = ProfessionsFrame and ProfessionsFrame.SpecPage
     if not specPage or not specPage:IsShown() then return end
 
-    local baseID, variantID = self:GetSpecPageProfessionIDs()
-    if not baseID or not variantID then
-        PK:Debug("Spec highlights: no profession IDs found")
-        return
-    end
+    -- When overlay is disabled, use empty cache to clear all highlights
+    if PK:GetSetting("showOverlay") == false then
+        cachedAltNodeData   = {}
+        cachedProfBaseID    = nil
+        cachedProfVariantID = nil
+    else
+        local baseID, variantID = self:GetSpecPageProfessionIDs()
+        if not baseID or not variantID then
+            PK:Debug("Spec highlights: no profession IDs found")
+            return
+        end
 
-    -- Rebuild the cache when the profession or expansion variant changes
-    if baseID ~= cachedProfBaseID or variantID ~= cachedProfVariantID then
-        cachedAltNodeData   = self:BuildAltNodeLookup(baseID, variantID)
-        cachedProfBaseID    = baseID
-        cachedProfVariantID = variantID
-        PK:Debug("Spec highlights: rebuilt cache for baseID "
-            .. tostring(baseID) .. " variant " .. tostring(variantID))
+        -- Rebuild the cache when the profession or expansion variant changes
+        if baseID ~= cachedProfBaseID or variantID ~= cachedProfVariantID then
+            cachedAltNodeData   = self:BuildAltNodeLookup(baseID, variantID)
+            cachedProfBaseID    = baseID
+            cachedProfVariantID = variantID
+            PK:Debug("Spec highlights: rebuilt cache for baseID "
+                .. tostring(baseID) .. " variant " .. tostring(variantID))
+        end
     end
 
     -- Obtain the configID for this variant so we can resolve node names
@@ -2086,6 +2089,133 @@ function PK:ToggleSummaryWindowAnchored(anchorFrame)
         summaryFrame:Hide()
     else
         self:ShowSummaryWindowAnchored(anchorFrame)
+    end
+end
+
+----------------------------------------------------------------------
+-- Export Window — copyable text box with all character data
+----------------------------------------------------------------------
+
+----------------------------------------------------------------------
+-- Options Panel
+----------------------------------------------------------------------
+
+local optionsPanel = nil
+
+local function CreateCheckbox(parent, label, settingKey, yOffset, onChange)
+    local check = CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
+    check:SetPoint("TOPLEFT", 16, yOffset)
+    check:SetSize(26, 26)
+    check:SetChecked(PK:GetSetting(settingKey) ~= false)
+
+    local text = check:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    text:SetPoint("LEFT", check, "RIGHT", 4, 0)
+    text:SetText(label)
+
+    check:SetScript("OnClick", function(self)
+        local val = self:GetChecked()
+        PK:SetSetting(settingKey, val)
+        if onChange then onChange(val) end
+    end)
+
+    return check
+end
+
+function PK:CreateOptionsPanel()
+    local frame = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
+    frame:SetSize(280, 260)
+    frame:SetPoint("CENTER")
+    frame:SetMovable(true)
+    frame:EnableMouse(true)
+    frame:RegisterForDrag("LeftButton")
+    frame:SetScript("OnDragStart", frame.StartMoving)
+    frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
+    frame:SetFrameStrata("FULLSCREEN_DIALOG")
+    frame:SetClampedToScreen(true)
+
+    frame:SetBackdrop({
+        bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
+        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+        tile     = true,
+        tileSize = 32,
+        edgeSize = 32,
+        insets   = { left = 8, right = 8, top = 8, bottom = 8 },
+    })
+
+    -- Title
+    local title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    title:SetPoint("TOP", 0, -16)
+    title:SetText("|cff00ccffProfKnowledge|r — Options")
+
+    -- Close button
+    local closeBtn = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
+    closeBtn:SetPoint("TOPRIGHT", -4, -4)
+
+    -- Toggles
+    local y = -48
+
+    CreateCheckbox(frame, "Node Overlay (spec tree highlights)", "showOverlay", y, function()
+        if PK.UpdateSpecTreeHighlights then
+            PK:UpdateSpecTreeHighlights()
+        end
+    end)
+    y = y - 30
+
+    CreateCheckbox(frame, "Alt Knowledge Panel", "showAltPanel", y, function()
+        if PK.RefreshOverlay then
+            PK:RefreshOverlay()
+        end
+    end)
+    y = y - 30
+
+    CreateCheckbox(frame, "Guild Sync", "guildSync", y, function(val)
+        if val then
+            PK:Print("Guild sync enabled.")
+        else
+            PK:Print("Guild sync disabled.")
+        end
+    end)
+    y = y - 40
+
+    -- Separator
+    local sep = frame:CreateTexture(nil, "ARTWORK")
+    sep:SetHeight(1)
+    sep:SetPoint("TOPLEFT", 16, y)
+    sep:SetPoint("TOPRIGHT", -16, y)
+    sep:SetColorTexture(0.4, 0.4, 0.4, 0.5)
+    y = y - 16
+
+    -- Import / Export buttons
+    local exportBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    exportBtn:SetSize(110, 26)
+    exportBtn:SetPoint("TOPLEFT", 24, y)
+    exportBtn:SetText("Export Data")
+    exportBtn:SetScript("OnClick", function()
+        frame:Hide()
+        PK:ShowExportWindow()
+    end)
+
+    local importBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    importBtn:SetSize(110, 26)
+    importBtn:SetPoint("LEFT", exportBtn, "RIGHT", 8, 0)
+    importBtn:SetText("Import Data")
+    importBtn:SetScript("OnClick", function()
+        frame:Hide()
+        PK:ShowImportWindow()
+    end)
+
+    frame:Hide()
+    return frame
+end
+
+function PK:ToggleOptionsPanel()
+    if not optionsPanel then
+        optionsPanel = self:CreateOptionsPanel()
+    end
+    if optionsPanel:IsShown() then
+        optionsPanel:Hide()
+    else
+        optionsPanel:Show()
     end
 end
 
