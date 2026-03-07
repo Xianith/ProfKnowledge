@@ -1615,237 +1615,241 @@ function PK:UpdateSpecTreeHighlights()
     local buttons = CollectNodeButtons()
     PK:Debug("Spec highlights: processing " .. #buttons .. " node buttons")
 
+    -- Helper to clear all PK overlays from a button
+    local function ClearButtonOverlays(btn)
+        if btn.pkHighlight then btn.pkHighlight:Hide() end
+        if btn.pkRankText then
+            btn.pkRankText:Hide()
+            if btn.pkRankShadows then
+                for _, shadow in ipairs(btn.pkRankShadows) do shadow:Hide() end
+            end
+        end
+        if btn.pkOrangeText then
+            btn.pkOrangeText:Hide()
+            if btn.pkOrangeShadows then
+                for _, shadow in ipairs(btn.pkOrangeShadows) do shadow:Hide() end
+            end
+        end
+        if btn.pkBlizzRankText then btn.pkBlizzRankText:Show() end
+        btn.pkAltData = nil
+    end
+
     for _, button in ipairs(buttons) do
+        -- Resolve node name for this button (may fail at any step)
         local nodeID = button:GetNodeID()
+        local nodeName, altData
         if nodeID then
             local nodeInfo = nil
             pcall(function()
                 nodeInfo = C_Traits.GetNodeInfo(configID, nodeID)
             end)
-
             if nodeInfo then
-                local nodeName = self:ResolveNodeName(configID, nodeInfo)
-
+                nodeName = self:ResolveNodeName(configID, nodeInfo)
                 if nodeName then
-                    local altData = cachedAltNodeData[nodeName:lower()]
+                    altData = cachedAltNodeData[nodeName:lower()]
+                end
+            end
+        end
 
-                    if altData and #altData > 0 then
-                        -- Determine best state across all alts for this node
-                        -- and find the current character's rank + highest alt rank
-                        local bestState = "green"
-                        local highestRank = 0
-                        local currentCharRank = 0
-                        local currentKey = PK.charKey
-                        for _, alt in ipairs(altData) do
-                            local dMax = alt.maxRanks or 0
-                            local dRank = alt.rank or 0
-                            if dMax % 5 ~= 0 then
-                                dMax = dMax - 1
-                                dRank = math.max(dRank - 1, 0)
-                            end
-                            if alt.charKey == currentKey then
-                                currentCharRank = dRank
-                            end
-                            if dRank > highestRank then
-                                highestRank = dRank
-                            end
-                            if dRank >= dMax and dMax > 0 then
-                                bestState = "purple"
-                            elseif dRank > 0 and bestState ~= "purple" then
-                                bestState = "blue"
-                            end
-                        end
+        -- No valid alt data for this button — clean up any stale overlays
+        if not altData or #altData == 0 then
+            ClearButtonOverlays(button)
+        else
+            -- Determine best state across all alts for this node
+            local bestState = "green"
+            local highestRank = 0
+            local currentCharRank = 0
+            local currentKey = PK.charKey
+            for _, alt in ipairs(altData) do
+                local dMax = alt.maxRanks or 0
+                local dRank = alt.rank or 0
+                if dMax % 5 ~= 0 then
+                    dMax = dMax - 1
+                    dRank = math.max(dRank - 1, 0)
+                end
+                if alt.charKey == currentKey then
+                    currentCharRank = dRank
+                end
+                if dRank > highestRank then
+                    highestRank = dRank
+                end
+                if dRank >= dMax and dMax > 0 then
+                    bestState = "purple"
+                elseif dRank > 0 and bestState ~= "purple" then
+                    bestState = "blue"
+                end
+            end
 
-                        -- Find Blizzard's green rank FontString (cache on button)
-                        if not button.pkBlizzRankText then
-                            local found = button.SpendText or button.PointSpendText or button.RankText
-                            if not found then
-                                for _, region in ipairs({ button:GetRegions() }) do
-                                    if region:IsObjectType("FontString") then
-                                        local txt = region:GetText()
-                                        if txt and txt:match("^%d+$") then
-                                            found = region
-                                            break
-                                        end
-                                    end
-                                end
-                            end
-                            button.pkBlizzRankText = found or false
-                        end
-
-                        -- Show orange overlay number if current char has top rank
-                        if currentCharRank > 0 and currentCharRank >= highestRank then
-                            if not button.pkOrangeText then
-                                -- Black outline shadows (same technique as blue)
-                                local offsets = {
-                                    {-1,0}, {1,0}, {0,-1}, {0,1},
-                                    {-1,-1}, {1,-1}, {-1,1}, {1,1},
-                                }
-                                button.pkOrangeShadows = {}
-                                local fontPath, fontSize, fontFlags = GameFontNormal:GetFont()
-                                for _, off in ipairs(offsets) do
-                                    local shadow = button:CreateFontString(nil, "OVERLAY", nil, 7)
-                                    shadow:SetFont(fontPath, fontSize + 3, fontFlags)
-                                    shadow:SetPoint("BOTTOM", button, "BOTTOM", off[1], -2 + off[2])
-                                    shadow:SetTextColor(0, 0, 0, 1)
-                                    table.insert(button.pkOrangeShadows, shadow)
-                                end
-                                local orangeText = button:CreateFontString(nil, "OVERLAY", nil, 7)
-                                orangeText:SetFont(fontPath, fontSize + 3, fontFlags)
-                                orangeText:SetPoint("BOTTOM", button, "BOTTOM", 0, -2)
-                                button.pkOrangeText = orangeText
-                            end
-                            local label = tostring(currentCharRank)
-                            button.pkOrangeText:SetText(label)
-                            button.pkOrangeText:SetTextColor(1.0, 0.5, 0.0, 1)
-                            button.pkOrangeText:Show()
-                            for _, shadow in ipairs(button.pkOrangeShadows) do
-                                shadow:SetText(label)
-                                shadow:Show()
-                            end
-                            -- Hide Blizzard's green rank text so orange replaces it cleanly
-                            if button.pkBlizzRankText then
-                                button.pkBlizzRankText:Hide()
-                            end
-                        else
-                            if button.pkOrangeText then
-                                button.pkOrangeText:Hide()
-                                for _, shadow in ipairs(button.pkOrangeShadows) do
-                                    shadow:Hide()
-                                end
-                            end
-                            -- Restore Blizzard's green rank text
-                            if button.pkBlizzRankText then
-                                button.pkBlizzRankText:Show()
+            -- Find Blizzard's green rank FontString (cache on button)
+            if not button.pkBlizzRankText then
+                local found = button.SpendText or button.PointSpendText or button.RankText
+                if not found then
+                    for _, region in ipairs({ button:GetRegions() }) do
+                        if region:IsObjectType("FontString") then
+                            local txt = region:GetText()
+                            if txt and txt:match("^%d+$") then
+                                found = region
+                                break
                             end
                         end
-
-                        -- ── Color circle overlay (all three states) ──
-                        local cr, cg, cb, ca
-                        if bestState == "purple" then
-                            cr, cg, cb, ca = 0.64, 0.21, 0.93, 0.35
-                        elseif bestState == "blue" then
-                            cr, cg, cb, ca = 0.0, 0.44, 0.87, 0.35
-                        else
-                            cr, cg, cb, ca = 0.12, 0.75, 0.12, 0.30
-                        end
-                        if not button.pkHighlight then
-                            local glow = button:CreateTexture(nil, "OVERLAY", nil, 7)
-                            glow:SetPoint("CENTER", 0, 0)
-                            local size = math.min(button:GetWidth(), button:GetHeight()) * 0.95
-                            glow:SetSize(size, size)
-                            glow:SetTexture("Interface\\CHARACTERFRAME\\TempPortraitAlphaMask")
-                            glow:SetBlendMode("ADD")
-                            button.pkHighlight = glow
-                        end
-                        button.pkHighlight:SetVertexColor(cr, cg, cb, ca)
-                        button.pkHighlight:Show()
-
-                        -- ── Blue rank number (only for partial/blue nodes, hidden when orange is showing) ──
-                        local showingOrange = currentCharRank > 0 and currentCharRank >= highestRank
-                        if bestState == "blue" and not showingOrange then
-                            if not button.pkRankText then
-                                local offsets = {
-                                    {-1,0}, {1,0}, {0,-1}, {0,1},
-                                    {-1,-1}, {1,-1}, {-1,1}, {1,1},
-                                }
-                                button.pkRankShadows = {}
-                                for _, off in ipairs(offsets) do
-                                    local shadow = button:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-                                    shadow:SetPoint("CENTER", button, "CENTER", off[1], -37 + off[2])
-                                    shadow:SetTextColor(0, 0, 0, 1)
-                                    table.insert(button.pkRankShadows, shadow)
-                                end
-                                local rankText = button:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-                                rankText:SetPoint("CENTER", button, "CENTER", 0, -37)
-                                button.pkRankText = rankText
-                            end
-                            local label = tostring(highestRank)
-                            button.pkRankText:SetText(label)
-                            button.pkRankText:SetTextColor(0.3, 0.6, 1.0, 1)
-                            button.pkRankText:Show()
-                            for _, shadow in ipairs(button.pkRankShadows) do
-                                shadow:SetText(label)
-                                shadow:Show()
-                            end
-                        else
-                            if button.pkRankText then
-                                button.pkRankText:Hide()
-                                for _, shadow in ipairs(button.pkRankShadows) do
-                                    shadow:Hide()
-                                end
-                            end
-                        end
-
-                        -- Store lookup data on the button for the tooltip
-                        button.pkAltData  = altData
-                        button.pkNodeName = nodeName
-
-                        -- Hook the tooltip (once per button)
-                        if not button.pkTooltipHooked then
-                            button.pkTooltipHooked = true
-                            button:HookScript("OnEnter", function(self)
-                                if not self.pkAltData then return end
-                                if not GameTooltip:IsShown() then return end
-
-                                local currentKey = PK.charKey
-                                -- Collect alt lines first, then only show header if non-empty
-                                local altLines = {}
-                                for _, alt in ipairs(self.pkAltData) do
-                                    if alt.charKey ~= currentKey then
-                                        local cc = PK.ClassColors[alt.className] or "|cffffffff"
-                                        local name = alt.charKey:match("^(.-)%-") or alt.charKey
-                                        local displayMax = alt.maxRanks
-                                        local displayRank = alt.rank
-                                        if displayMax % 5 ~= 0 then
-                                            displayMax = displayMax - 1
-                                            displayRank = math.max(displayRank - 1, 0)
-                                        end
-                                        local rankColor
-                                        if displayRank >= displayMax then
-                                            rankColor = "|cff00ff00"
-                                        elseif displayRank > 0 then
-                                            rankColor = "|cffffd700"
-                                        else
-                                            rankColor = "|cff555555"
-                                        end
-                                        table.insert(altLines, {
-                                            left  = cc .. name .. "|r",
-                                            right = rankColor .. displayRank .. "/" .. displayMax .. "|r",
-                                        })
-                                    end
-                                end
-                                if #altLines > 0 then
-                                    GameTooltip:AddLine(" ")
-                                    GameTooltip:AddLine("|cff00ccffAlt Knowledge:|r")
-                                    for _, line in ipairs(altLines) do
-                                        GameTooltip:AddDoubleLine(line.left, line.right, 1, 1, 1)
-                                    end
-                                end
-                                GameTooltip:Show()
-                            end)
-                        end
-
-                    else
-                        -- No alt data — hide any previous overlay and reset colors
-                        if button.pkHighlight then
-                            button.pkHighlight:Hide()
-                        end
-                        if button.pkRankText then
-                            button.pkRankText:Hide()
-                            for _, shadow in ipairs(button.pkRankShadows) do
-                                shadow:Hide()
-                            end
-                        end
-                        if button.pkOrangeText then
-                            button.pkOrangeText:Hide()
-                            for _, shadow in ipairs(button.pkOrangeShadows) do
-                                shadow:Hide()
-                            end
-                        end
-                        button.pkAltData = nil
                     end
                 end
+                button.pkBlizzRankText = found or false
+            end
+
+            -- Hide Blizzard's rank text if it shows "0" (purchased but uninvested)
+            if button.pkBlizzRankText then
+                local blizzText = button.pkBlizzRankText:GetText()
+                if blizzText == "0" then
+                    button.pkBlizzRankText:Hide()
+                end
+            end
+
+            -- Show orange overlay number if current char has top rank
+            local showingOrange = currentCharRank > 0 and currentCharRank >= highestRank
+            if showingOrange then
+                if not button.pkOrangeText then
+                    local offsets = {
+                        {-1,0}, {1,0}, {0,-1}, {0,1},
+                        {-1,-1}, {1,-1}, {-1,1}, {1,1},
+                    }
+                    button.pkOrangeShadows = {}
+                    local fontPath, fontSize, fontFlags = GameFontNormal:GetFont()
+                    for _, off in ipairs(offsets) do
+                        local shadow = button:CreateFontString(nil, "OVERLAY", nil, 7)
+                        shadow:SetFont(fontPath, fontSize + 3, fontFlags)
+                        shadow:SetPoint("BOTTOM", button, "BOTTOM", off[1], -2 + off[2])
+                        shadow:SetTextColor(0, 0, 0, 1)
+                        table.insert(button.pkOrangeShadows, shadow)
+                    end
+                    local orangeText = button:CreateFontString(nil, "OVERLAY", nil, 7)
+                    orangeText:SetFont(fontPath, fontSize + 3, fontFlags)
+                    orangeText:SetPoint("BOTTOM", button, "BOTTOM", 0, -2)
+                    button.pkOrangeText = orangeText
+                end
+                local label = tostring(currentCharRank)
+                button.pkOrangeText:SetText(label)
+                button.pkOrangeText:SetTextColor(1.0, 0.5, 0.0, 1)
+                button.pkOrangeText:Show()
+                for _, shadow in ipairs(button.pkOrangeShadows) do
+                    shadow:SetText(label)
+                    shadow:Show()
+                end
+                -- Hide Blizzard's green rank text so orange replaces it cleanly
+                if button.pkBlizzRankText then
+                    button.pkBlizzRankText:Hide()
+                end
+            else
+                if button.pkOrangeText then
+                    button.pkOrangeText:Hide()
+                    for _, shadow in ipairs(button.pkOrangeShadows) do
+                        shadow:Hide()
+                    end
+                end
+            end
+
+            -- ── Color circle overlay (all three states) ──
+            local cr, cg, cb, ca
+            if bestState == "purple" then
+                cr, cg, cb, ca = 0.64, 0.21, 0.93, 0.35
+            elseif bestState == "blue" then
+                cr, cg, cb, ca = 0.0, 0.44, 0.87, 0.35
+            else
+                cr, cg, cb, ca = 0.12, 0.75, 0.12, 0.30
+            end
+            if not button.pkHighlight then
+                local glow = button:CreateTexture(nil, "OVERLAY", nil, 7)
+                glow:SetPoint("CENTER", 0, 0)
+                local size = math.min(button:GetWidth(), button:GetHeight()) * 0.95
+                glow:SetSize(size, size)
+                glow:SetTexture("Interface\\CHARACTERFRAME\\TempPortraitAlphaMask")
+                glow:SetBlendMode("ADD")
+                button.pkHighlight = glow
+            end
+            button.pkHighlight:SetVertexColor(cr, cg, cb, ca)
+            button.pkHighlight:Show()
+
+            -- ── Blue rank number (only for partial/blue nodes with rank > 0) ──
+            if bestState == "blue" and highestRank > 0 and not showingOrange then
+                if not button.pkRankText then
+                    local offsets = {
+                        {-1,0}, {1,0}, {0,-1}, {0,1},
+                        {-1,-1}, {1,-1}, {-1,1}, {1,1},
+                    }
+                    button.pkRankShadows = {}
+                    for _, off in ipairs(offsets) do
+                        local shadow = button:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+                        shadow:SetPoint("CENTER", button, "CENTER", off[1], -37 + off[2])
+                        shadow:SetTextColor(0, 0, 0, 1)
+                        table.insert(button.pkRankShadows, shadow)
+                    end
+                    local rankText = button:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+                    rankText:SetPoint("CENTER", button, "CENTER", 0, -37)
+                    button.pkRankText = rankText
+                end
+                local label = tostring(highestRank)
+                button.pkRankText:SetText(label)
+                button.pkRankText:SetTextColor(0.3, 0.6, 1.0, 1)
+                button.pkRankText:Show()
+                for _, shadow in ipairs(button.pkRankShadows) do
+                    shadow:SetText(label)
+                    shadow:Show()
+                end
+            else
+                if button.pkRankText then
+                    button.pkRankText:Hide()
+                    for _, shadow in ipairs(button.pkRankShadows) do
+                        shadow:Hide()
+                    end
+                end
+            end
+
+            -- Store lookup data on the button for the tooltip
+            button.pkAltData  = altData
+            button.pkNodeName = nodeName
+
+            -- Hook the tooltip (once per button)
+            if not button.pkTooltipHooked then
+                button.pkTooltipHooked = true
+                button:HookScript("OnEnter", function(self)
+                    if not self.pkAltData then return end
+                    if not GameTooltip:IsShown() then return end
+
+                    local currentKey = PK.charKey
+                    local altLines = {}
+                    for _, alt in ipairs(self.pkAltData) do
+                        if alt.charKey ~= currentKey then
+                            local cc = PK.ClassColors[alt.className] or "|cffffffff"
+                            local name = alt.charKey:match("^(.-)%-") or alt.charKey
+                            local displayMax = alt.maxRanks
+                            local displayRank = alt.rank
+                            if displayMax % 5 ~= 0 then
+                                displayMax = displayMax - 1
+                                displayRank = math.max(displayRank - 1, 0)
+                            end
+                            local rankColor
+                            if displayRank >= displayMax then
+                                rankColor = "|cff00ff00"
+                            elseif displayRank > 0 then
+                                rankColor = "|cffffd700"
+                            else
+                                rankColor = "|cff555555"
+                            end
+                            table.insert(altLines, {
+                                left  = cc .. name .. "|r",
+                                right = rankColor .. displayRank .. "/" .. displayMax .. "|r",
+                            })
+                        end
+                    end
+                    if #altLines > 0 then
+                        GameTooltip:AddLine(" ")
+                        GameTooltip:AddLine("|cff00ccffAlt Knowledge:|r")
+                        for _, line in ipairs(altLines) do
+                            GameTooltip:AddDoubleLine(line.left, line.right, 1, 1, 1)
+                        end
+                    end
+                    GameTooltip:Show()
+                end)
             end
         end
     end

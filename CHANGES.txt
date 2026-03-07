@@ -1,3 +1,13 @@
+## v0.2.2 — Spec Tree Overlay Cleanup
+
+### Bug Fixes
+- Fixed stale overlay highlights persisting when switching between spec tabs (recycled buttons now properly cleared)
+- Fixed "0" rank numbers appearing on purchased-but-uninvested nodes — Blizzard's rank text is now hidden when it shows "0"
+- Blue rank numbers no longer display when the highest alt rank is 0
+- Flattened the button rendering loop to prevent nodes with missing data from leaking overlays
+
+---
+
 ## v0.2.1 — Options Panel & Overlay Fix
 
 ### New Features
