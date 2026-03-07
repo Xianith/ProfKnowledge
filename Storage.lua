@@ -328,6 +328,11 @@ function PK:ExportAllData()
     add("Version: " .. (PK.version or "?"))
     add("")
 
+    local orderMap = {}
+    for i, id in ipairs(PK.ProfessionOrder) do
+        orderMap[id] = i
+    end
+
     local chars = self:GetAllCharacters()
     if #chars == 0 then
         add("No characters tracked.")
@@ -354,10 +359,6 @@ function PK:ExportAllData()
             if not self:IsEmptyProfession(profData) then
                 table.insert(profKeys, skillLineID)
             end
-        end
-        local orderMap = {}
-        for i, id in ipairs(PK.ProfessionOrder) do
-            orderMap[id] = i
         end
         table.sort(profKeys, function(a, b)
             return (orderMap[a] or 999) < (orderMap[b] or 999)
