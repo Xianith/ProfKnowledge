@@ -564,17 +564,8 @@ local function OnSyncPush(self, sender, payload, distribution)
     end
 
     PK:Debug("Sync push from " .. sender .. " (merged " .. merged .. ")")
-
-    -- As DR, rebroadcast this data as a DELTA so all nodes get it
-    if self.syncRole == "DR" and merged > 0 then
-        for charKey, entry in pairs(data) do
-            self:SendGuildMessage(PK.MSG_DELTA, {
-                charKey  = charKey,
-                data     = entry,
-                guildKey = self.guildKey,
-            })
-        end
-    end
+    -- DR no longer rebroadcasts push data as deltas — each member
+    -- broadcasts their own deltas directly, avoiding amplification.
 end
 
 --- DELTA handler: incremental update from a guild member.

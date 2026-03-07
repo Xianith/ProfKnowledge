@@ -28,6 +28,27 @@ PK.charKey        = nil
 PK.profFrameReady = false
 
 ----------------------------------------------------------------------
+-- Broadcast debounce — coalesces rapid events into a single sync
+----------------------------------------------------------------------
+
+local pendingBroadcast = nil   -- timer handle
+local BROADCAST_COOLDOWN = 5   -- seconds to wait after last event
+
+--- Schedule a SeedOwnData + BroadcastDelta, debounced.
+--- Multiple calls within BROADCAST_COOLDOWN collapse into one.
+function PK:ScheduleBroadcast()
+    if pendingBroadcast then
+        pendingBroadcast:Cancel()
+    end
+    pendingBroadcast = C_Timer.NewTimer(BROADCAST_COOLDOWN, function()
+        pendingBroadcast = nil
+        PK:SeedOwnData()
+        PK:BroadcastDelta()
+        PK:Debug("Debounced broadcast fired")
+    end)
+end
+
+----------------------------------------------------------------------
 -- Debug / Print helpers
 ----------------------------------------------------------------------
 
@@ -640,9 +661,7 @@ f:SetScript("OnEvent", function(_, event, name)
                     PK:UpdateSpecTreeHighlights()
                 end)
             end
-            -- Broadcast delta to guild after scan
-            PK:SeedOwnData()
-            PK:BroadcastDelta()
+            PK:ScheduleBroadcast()
         end)
 
     elseif event == "TRADE_SKILL_LIST_UPDATE" then
@@ -657,9 +676,7 @@ f:SetScript("OnEvent", function(_, event, name)
                     PK:UpdateSpecTreeHighlights()
                 end)
             end
-            -- Broadcast delta to guild after scan
-            PK:SeedOwnData()
-            PK:BroadcastDelta()
+            PK:ScheduleBroadcast()
         end)
 
     elseif event == "TRAIT_CONFIG_UPDATED" then
@@ -674,17 +691,14 @@ f:SetScript("OnEvent", function(_, event, name)
                     PK:UpdateSpecTreeHighlights()
                 end)
             end
-            -- Broadcast delta to guild after scan
-            PK:SeedOwnData()
-            PK:BroadcastDelta()
+            PK:ScheduleBroadcast()
         end)
 
     elseif event == "SKILL_LINES_CHANGED" then
         -- Profession data loaded/changed
         C_Timer.After(2, function()
             PK:ScanAllProfessions()
-            PK:SeedOwnData()
-            PK:BroadcastDelta()
+            PK:ScheduleBroadcast()
         end)
 
     elseif event == "GUILD_ROSTER_UPDATE" then
