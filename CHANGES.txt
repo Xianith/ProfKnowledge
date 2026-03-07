@@ -1,10 +1,24 @@
-## v0.1.9 — Guild Sync & Spec Overlay Improvements
+## v0.2.0 — UI Polish, Performance & Sync Fixes
+
+### Summary Window
+- Profession icons now display as small circular icons next to profession names
+- Guild members shown in their class color instead of grey
+- Horizontal separator line between local alts and guild members
+- Status text ("X local, Y guild") moved into the dark inset area
+- Wider profession columns to accommodate icons
+- ProfKnowledge window auto-closes when the Professions Book is closed
+
+### Performance
+- Added 5-second debounce to guild sync broadcasts — rapid profession events now coalesce into a single broadcast instead of spamming the guild channel
+- Removed DR rebroadcast amplification — the Designated Router no longer re-broadcasts every incoming delta, eliminating doubled guild traffic
+- Sync broadcasts only fire when the PK window or Professions frame is visible — background events no longer generate guild traffic
 
 ### Guild Sync
 - Fixed guild synced characters not appearing in the summary window
 - Guild sync now includes node-level data for specialization tree overlays
 - Guild members' spec tree progress visible on overlay and tooltips
 - Improved profession key matching for guild roster (handles base/variant ID mismatches)
+- DR/BDR role labels hidden from sync tooltip unless /pk debug is enabled
 
 ### Spec Tree Overlay
 - Current character no longer shown in the Alt Knowledge overlay (only alts/guildies)
@@ -17,6 +31,13 @@
 ### Bug Fixes
 - Fixed "Character not found" errors when clicking guild member cells
 - Fixed detail panel and tooltips not loading guild member profession data
+- Fixed steadily increasing world latency caused by unthrottled sync broadcasts
+
+---
+
+## v0.1.9 — Guild Sync & Spec Overlay Improvements
+
+(Intermediate release — all changes rolled into v0.2.0)
 
 ---
 
