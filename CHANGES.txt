@@ -1,3 +1,27 @@
+## v0.3.2 — Overlay Reliability & Addon Compatibility
+
+### Bug Fixes
+- Fixed overlay numbers showing incorrect values when switching spec tabs — Blizzard rank text scan was picking up PK's own font strings as "Blizzard's" rank text, causing stale numbers to bleed through
+- Fixed overlay not appearing on first open until toggled off/on — added fallback profession frame setup and initial render when hooks are installed
+- Fixed version display lagging one version behind — deployment was silently failing due to permission errors
+
+### Addon Compatibility (CraftSim, etc.)
+- Hardened node button detection — CollectNodeButtons now validates each frame is a real Blizzard talent button (checks return type, object type, known methods) instead of blindly trusting any frame with a GetNodeID key
+- Entire spec tree highlight pass is now pcall-wrapped — addon conflicts produce a debug message instead of a Lua error popup
+- All C_Spell.GetSpellName and GetSpellInfo calls are now pcall-protected
+
+### Performance
+- Added debounce system for highlight updates — UpdateButton hook (fires per-button, 30-40 times on tab switch) now coalesces into a single render pass instead of flooding timers
+- All event-driven highlight calls use the same debounce, preventing redundant work
+- Profession scanning on login is now async (coroutine-based) — spreads work across frames to eliminate FPS hitch on first load
+- Multiple rapid scan triggers (SKILL_LINES_CHANGED, login timer) collapse into a single debounced scan
+
+### UI
+- Removed PK button from the Talents panel (N key) — it only belongs on the Professions Book
+- Added Debug Mode toggle to the options panel
+
+---
+
 ## v0.3.1 — UI & Sync Polish
 
 ### Bug Fixes

@@ -1430,6 +1430,32 @@ local cachedAltNodeData   = nil   -- { [lowerNodeName] = { {charKey,className,ra
 local cachedProfBaseID    = nil
 local cachedProfVariantID = nil
 
+-- Debounce timer for spec tree highlights (prevents timer flood from per-button hooks)
+local highlightDebounceTimer = nil
+local highlightDebounceForce = false
+
+local function ScheduleHighlightUpdate(delay, forceRebuild)
+    -- Track if any pending call wants a force rebuild
+    if forceRebuild then
+        highlightDebounceForce = true
+    end
+    -- Cancel any pending timer and reschedule
+    if highlightDebounceTimer then
+        highlightDebounceTimer:Cancel()
+    end
+    highlightDebounceTimer = C_Timer.NewTimer(delay, function()
+        highlightDebounceTimer = nil
+        local force = highlightDebounceForce
+        highlightDebounceForce = false
+        PK:UpdateSpecTreeHighlights(force)
+    end)
+end
+
+-- Expose for use from Core.lua event handlers
+function PK:ScheduleHighlightUpdate(delay, forceRebuild)
+    ScheduleHighlightUpdate(delay, forceRebuild)
+end
+
 --- Build a table of every node that ANY other character has points in
 --- for a given base profession, optionally filtered to a specific expansion variant.
 function PK:BuildAltNodeLookup(baseSkillLineID, filterVariantID)
@@ -1525,6 +1551,24 @@ function PK:GetSpecPageProfessionIDs()
 end
 
 --- Collect every visible node button inside the spec page.
+--- Check if a frame is a real Blizzard talent node button (not an addon-injected frame).
+local function IsBlizzardNodeButton(frame)
+    -- Must have GetNodeID as a callable function
+    if type(frame.GetNodeID) ~= "function" then return false end
+    -- Verify it actually returns a number (real node buttons do)
+    local ok, nodeID = pcall(frame.GetNodeID, frame)
+    if not ok or type(nodeID) ~= "number" then return false end
+    -- Real talent buttons also have GetNodeInfo or are Button types
+    if frame:IsObjectType("Button") or frame:IsObjectType("CheckButton") then
+        return true
+    end
+    -- Fallback: accept if it has typical talent button methods
+    if frame.GetNodeInfo or frame.SetNodeID then
+        return true
+    end
+    return false
+end
+
 local function CollectNodeButtons()
     local specPage = ProfessionsFrame and ProfessionsFrame.SpecPage
     if not specPage then return {} end
@@ -1535,7 +1579,7 @@ local function CollectNodeButtons()
     if specPage.TalentButtonCollection then
         pcall(function()
             for button in specPage.TalentButtonCollection:EnumerateActive() do
-                if button.GetNodeID then
+                if IsBlizzardNodeButton(button) then
                     table.insert(buttons, button)
                 end
             end
@@ -1546,7 +1590,7 @@ local function CollectNodeButtons()
     if #buttons == 0 then
         local children = { specPage:GetChildren() }
         for _, child in ipairs(children) do
-            if child.GetNodeID then
+            if IsBlizzardNodeButton(child) then
                 table.insert(buttons, child)
             end
         end
@@ -1559,7 +1603,7 @@ local function CollectNodeButtons()
             if child.GetChildren then
                 local grandchildren = { child:GetChildren() }
                 for _, gc in ipairs(grandchildren) do
-                    if gc.GetNodeID then
+                    if IsBlizzardNodeButton(gc) then
                         table.insert(buttons, gc)
                     end
                 end
@@ -1571,7 +1615,16 @@ local function CollectNodeButtons()
 end
 
 --- Apply / refresh green highlights on every node button.
-function PK:UpdateSpecTreeHighlights()
+--- @param forceRebuild boolean  If true, always rebuild the alt data cache.
+function PK:UpdateSpecTreeHighlights(forceRebuild)
+    -- Wrap everything in pcall to avoid Lua errors from addon conflicts
+    local ok, err = pcall(self._UpdateSpecTreeHighlightsInner, self, forceRebuild)
+    if not ok then
+        PK:Debug("Spec highlights error: " .. tostring(err))
+    end
+end
+
+function PK:_UpdateSpecTreeHighlightsInner(forceRebuild)
     local specPage = ProfessionsFrame and ProfessionsFrame.SpecPage
     if not specPage or not specPage:IsShown() then return end
 
@@ -1607,8 +1660,8 @@ function PK:UpdateSpecTreeHighlights()
         return
     end
 
-    -- Rebuild the cache when the profession or expansion variant changes
-    if baseID ~= cachedProfBaseID or variantID ~= cachedProfVariantID then
+    -- Rebuild the cache when the profession/variant changes or when forced
+    if forceRebuild or baseID ~= cachedProfBaseID or variantID ~= cachedProfVariantID then
         cachedAltNodeData   = self:BuildAltNodeLookup(baseID, variantID)
         cachedProfBaseID    = baseID
         cachedProfVariantID = variantID
@@ -1649,10 +1702,13 @@ function PK:UpdateSpecTreeHighlights()
     end
 
     for _, button in ipairs(buttons) do
+        -- ALWAYS clear all PK overlays first to prevent stale numbers
+        ClearButtonOverlays(button)
+
         -- Resolve node name for this button (may fail at any step)
-        local nodeID = button:GetNodeID()
+        local ok, nodeID = pcall(button.GetNodeID, button)
         local nodeName, altData
-        if nodeID then
+        if ok and nodeID then
             local nodeInfo = nil
             pcall(function()
                 nodeInfo = C_Traits.GetNodeInfo(configID, nodeID)
@@ -1665,10 +1721,8 @@ function PK:UpdateSpecTreeHighlights()
             end
         end
 
-        -- No valid alt data for this button — clean up any stale overlays
-        if not altData or #altData == 0 then
-            ClearButtonOverlays(button)
-        else
+        -- Skip buttons with no valid alt data (already cleaned above)
+        if altData and #altData > 0 then
             -- Determine best state across all alts for this node
             local bestState = "green"
             local highestRank = 0
@@ -1694,28 +1748,44 @@ function PK:UpdateSpecTreeHighlights()
                 end
             end
 
-            -- Find Blizzard's green rank FontString (cache on button)
-            if not button.pkBlizzRankText then
-                local found = button.SpendText or button.PointSpendText or button.RankText
-                if not found then
-                    for _, region in ipairs({ button:GetRegions() }) do
-                        if region:IsObjectType("FontString") then
+            -- Re-resolve Blizzard's rank FontString every time (buttons recycle).
+            -- IMPORTANT: skip our own PK font strings — they are also regions
+            -- of this button and can have stale numeric text from the previous tab.
+            local blizzRank = button.SpendText or button.PointSpendText or button.RankText
+            if not blizzRank then
+                for _, region in ipairs({ button:GetRegions() }) do
+                    if region:IsObjectType("FontString")
+                       and region ~= button.pkRankText
+                       and region ~= button.pkOrangeText then
+                        -- Also skip shadow font strings
+                        local isShadow = false
+                        if button.pkRankShadows then
+                            for _, s in ipairs(button.pkRankShadows) do
+                                if region == s then isShadow = true; break end
+                            end
+                        end
+                        if not isShadow and button.pkOrangeShadows then
+                            for _, s in ipairs(button.pkOrangeShadows) do
+                                if region == s then isShadow = true; break end
+                            end
+                        end
+                        if not isShadow then
                             local txt = region:GetText()
                             if txt and txt:match("^%d+$") then
-                                found = region
+                                blizzRank = region
                                 break
                             end
                         end
                     end
                 end
-                button.pkBlizzRankText = found or false
             end
+            button.pkBlizzRankText = blizzRank or false
 
             -- Hide Blizzard's rank text if it shows "0" (purchased but uninvested)
-            if button.pkBlizzRankText then
-                local blizzText = button.pkBlizzRankText:GetText()
+            if blizzRank then
+                local blizzText = blizzRank:GetText()
                 if blizzText == "0" then
-                    button.pkBlizzRankText:Hide()
+                    blizzRank:Hide()
                 end
             end
 
@@ -1750,15 +1820,8 @@ function PK:UpdateSpecTreeHighlights()
                     shadow:Show()
                 end
                 -- Hide Blizzard's green rank text so orange replaces it cleanly
-                if button.pkBlizzRankText then
-                    button.pkBlizzRankText:Hide()
-                end
-            else
-                if button.pkOrangeText then
-                    button.pkOrangeText:Hide()
-                    for _, shadow in ipairs(button.pkOrangeShadows) do
-                        shadow:Hide()
-                    end
+                if blizzRank then
+                    blizzRank:Hide()
                 end
             end
 
@@ -1808,13 +1871,6 @@ function PK:UpdateSpecTreeHighlights()
                 for _, shadow in ipairs(button.pkRankShadows) do
                     shadow:SetText(label)
                     shadow:Show()
-                end
-            else
-                if button.pkRankText then
-                    button.pkRankText:Hide()
-                    for _, shadow in ipairs(button.pkRankShadows) do
-                        shadow:Hide()
-                    end
                 end
             end
 
@@ -1885,9 +1941,7 @@ function PK:SetupSpecTreeOverlay()
     specPage:HookScript("OnShow", function()
         cachedProfBaseID    = nil       -- force cache refresh
         cachedProfVariantID = nil
-        C_Timer.After(0.5, function()
-            PK:UpdateSpecTreeHighlights()
-        end)
+        ScheduleHighlightUpdate(0.5)
     end)
 
     -- When a different spec tab is selected (SetTalentTreeID)
@@ -1895,69 +1949,30 @@ function PK:SetupSpecTreeOverlay()
         hooksecurefunc(specPage, "SetTalentTreeID", function()
             cachedProfBaseID    = nil
             cachedProfVariantID = nil
-            C_Timer.After(0.3, function()
-                PK:UpdateSpecTreeHighlights()
-            end)
+            ScheduleHighlightUpdate(0.3)
         end)
     end
 
     -- When tree currency / points update
     if specPage.UpdateTreeCurrencyInfo then
         hooksecurefunc(specPage, "UpdateTreeCurrencyInfo", function()
-            C_Timer.After(0.2, function()
-                PK:UpdateSpecTreeHighlights()
-            end)
+            ScheduleHighlightUpdate(0.3)
         end)
     end
 
-    -- When individual buttons are refreshed
+    -- When individual buttons are refreshed (fires per-button, needs debounce)
     if specPage.UpdateButton then
         hooksecurefunc(specPage, "UpdateButton", function()
-            C_Timer.After(0.2, function()
-                PK:UpdateSpecTreeHighlights()
-            end)
+            ScheduleHighlightUpdate(0.3)
         end)
     end
 
     PK:Debug("Spec tree overlay hooks installed")
-end
 
-----------------------------------------------------------------------
--- Button on Blizzard Profession Frame
-----------------------------------------------------------------------
-
-function PK:CreateProfessionButton()
-    -- Attach to the Professions overview pane (opened with K key)
-    local spellsFrame = PlayerSpellsFrame
-    if not spellsFrame then return end
-
-    local btn = CreateFrame("Button", nil, spellsFrame, "UIPanelButtonTemplate")
-    btn:SetSize(60, 20)
-    btn:SetText("|cff00ccffPK|r")
-    -- Anchor to the left of the close button
-    local closeBtn = spellsFrame.CloseButton or spellsFrame.ClosePanelButton
-    if closeBtn then
-        btn:SetPoint("RIGHT", closeBtn, "LEFT", -4, 0)
-    else
-        btn:SetPoint("TOPRIGHT", spellsFrame, "TOPRIGHT", -60, -2)
+    -- Initial render if the SpecPage is already visible when hooks are installed
+    if specPage:IsShown() then
+        ScheduleHighlightUpdate(0.5)
     end
-    btn:SetFrameStrata("HIGH")
-
-    btn:SetScript("OnClick", function()
-        PK:ShowSummaryWindowAnchored(spellsFrame)
-    end)
-
-    btn:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
-        GameTooltip:AddLine("|cff00ccffProfKnowledge|r")
-        GameTooltip:AddLine("View profession knowledge across all characters", 1, 1, 1, true)
-        GameTooltip:Show()
-    end)
-    btn:SetScript("OnLeave", function()
-        GameTooltip:Hide()
-    end)
-
-    PK:Debug("PK button added to professions overview pane")
 end
 
 --- Tab on ProfessionsBookFrame (matching Recipes / Specializations tab style)
@@ -2160,7 +2175,7 @@ end
 
 function PK:CreateOptionsPanel()
     local frame = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
-    frame:SetSize(280, 260)
+    frame:SetSize(280, 290)
     frame:SetPoint("CENTER")
     frame:SetMovable(true)
     frame:EnableMouse(true)
@@ -2211,6 +2226,11 @@ function PK:CreateOptionsPanel()
         else
             PK:Print("Guild sync disabled.")
         end
+    end)
+    y = y - 30
+
+    CreateCheckbox(frame, "Debug Mode", "debug", y, function(val)
+        PK:Print("Debug mode: " .. (val and "|cff00ff00ON|r" or "|cffff0000OFF|r"))
     end)
     y = y - 40
 

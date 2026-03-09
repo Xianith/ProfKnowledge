@@ -28,6 +28,63 @@ PK.charKey        = nil
 PK.profFrameReady = false
 
 ----------------------------------------------------------------------
+-- Scan debounce — prevents duplicate scans during login
+----------------------------------------------------------------------
+
+local scanDebounceTimer = nil
+
+--- Schedule a profession scan, canceling any pending one.
+--- Multiple rapid calls (SKILL_LINES_CHANGED, PLAYER_LOGIN timer, etc.)
+--- collapse into a single scan.
+function PK:ScheduleScan(delay)
+    if scanDebounceTimer then
+        scanDebounceTimer:Cancel()
+    end
+    scanDebounceTimer = C_Timer.NewTimer(delay, function()
+        scanDebounceTimer = nil
+        PK:ScanAllProfessionsAsync()
+    end)
+end
+
+----------------------------------------------------------------------
+-- Async profession scanning — spreads work across multiple frames
+-- to avoid FPS hitches on login
+----------------------------------------------------------------------
+
+local scanCoroutine = nil
+local scanTickerFrame = nil
+
+--- Coroutine-based scan: yields after each variant to let a frame render.
+function PK:ScanAllProfessionsAsync()
+    -- If a scan is already in progress, restart it
+    if scanCoroutine then
+        scanCoroutine = nil
+    end
+
+    scanCoroutine = coroutine.create(function()
+        PK:ScanAllProfessionsCoroutine()
+    end)
+
+    -- Tick the coroutine once per frame via OnUpdate
+    if not scanTickerFrame then
+        scanTickerFrame = CreateFrame("Frame")
+    end
+    scanTickerFrame:SetScript("OnUpdate", function()
+        if not scanCoroutine or coroutine.status(scanCoroutine) == "dead" then
+            scanTickerFrame:SetScript("OnUpdate", nil)
+            scanCoroutine = nil
+            return
+        end
+        local ok, err = coroutine.resume(scanCoroutine)
+        if not ok then
+            PK:Debug("Scan coroutine error: " .. tostring(err))
+            scanTickerFrame:SetScript("OnUpdate", nil)
+            scanCoroutine = nil
+        end
+    end)
+end
+
+----------------------------------------------------------------------
 -- Manual sync trigger — only fires when PK or spec page is opened
 ----------------------------------------------------------------------
 
@@ -120,9 +177,11 @@ function PK:ResolveNodeName(configID, nodeInfo)
                 if defInfo.spellID then
                     local spellName
                     if C_Spell and C_Spell.GetSpellName then
-                        spellName = C_Spell.GetSpellName(defInfo.spellID)
+                        local spOK, spResult = pcall(C_Spell.GetSpellName, defInfo.spellID)
+                        if spOK then spellName = spResult end
                     elseif GetSpellInfo then
-                        spellName = GetSpellInfo(defInfo.spellID)
+                        local spOK, spResult = pcall(GetSpellInfo, defInfo.spellID)
+                        if spOK then spellName = spResult end
                     end
                     if spellName and spellName ~= "" then
                         return spellName
@@ -278,6 +337,118 @@ function PK:ScanAllProfessions()
     for _ in pairs(profData) do count = count + 1 end
     PK:Debug("Scanned " .. count .. " profession(s) for " .. self.charKey
         .. " (prof1=" .. tostring(prof1BaseID) .. " prof2=" .. tostring(prof2BaseID) .. ")")
+end
+
+----------------------------------------------------------------------
+-- Async version — yields after each variant to avoid FPS hitch.
+-- Same logic as ScanAllProfessions but spreads work across frames.
+----------------------------------------------------------------------
+
+function PK:ScanAllProfessionsCoroutine()
+    if not self.charKey then
+        self:UpdatePlayerInfo()
+    end
+
+    local prof1, prof2, archaeology, fishing, cooking = GetProfessions()
+    local basicInfo = {}
+    for _, profIndex in ipairs({ prof1, prof2, archaeology, fishing, cooking }) do
+        if profIndex then
+            local name, icon, skillLevel, maxSkillLevel, _, _, skillLineID = GetProfessionInfo(profIndex)
+            if skillLineID and name then
+                basicInfo[skillLineID] = {
+                    name          = name,
+                    icon          = icon,
+                    skillLevel    = skillLevel,
+                    maxSkillLevel = maxSkillLevel,
+                }
+            end
+        end
+    end
+
+    local prof1BaseID, prof2BaseID = nil, nil
+    if prof1 then
+        local _, _, _, _, _, _, sid = GetProfessionInfo(prof1)
+        prof1BaseID = sid
+    end
+    if prof2 then
+        local _, _, _, _, _, _, sid = GetProfessionInfo(prof2)
+        prof2BaseID = sid
+    end
+
+    local allVariants = {}
+    if C_TradeSkillUI and C_TradeSkillUI.GetAllProfessionTradeSkillLines then
+        local ok, result = pcall(C_TradeSkillUI.GetAllProfessionTradeSkillLines)
+        if ok and result then
+            allVariants = result
+        end
+    end
+
+    -- Yield once before scanning variants
+    coroutine.yield()
+
+    local profData = {}
+    local scannedBaseIDs = {}
+
+    for _, variantID in ipairs(allVariants) do
+        local scanResult = self:ScanVariant(variantID, basicInfo)
+        if scanResult then
+            local baseID = scanResult.baseSkillLineID or scanResult.skillLineID
+            if not profData[baseID] or self:IsBetterScan(scanResult, profData[baseID]) then
+                profData[baseID] = scanResult
+                scannedBaseIDs[baseID] = true
+            end
+        end
+        -- Yield after each variant to let a frame render
+        coroutine.yield()
+    end
+
+    -- Fill in basic professions not covered by variants
+    for baseID, info in pairs(basicInfo) do
+        if not scannedBaseIDs[baseID] then
+            profData[baseID] = {
+                skillLineID         = baseID,
+                baseSkillLineID     = baseID,
+                variantID           = nil,
+                name                = info.name,
+                icon                = info.icon,
+                skillLevel          = info.skillLevel,
+                maxSkillLevel       = info.maxSkillLevel,
+                hasSpec             = false,
+                unspentKnowledge    = 0,
+                totalKnowledgeSpent = 0,
+                tabs                = {},
+            }
+        end
+    end
+
+    -- Merge: preserve cached tree data from previous deep scans
+    if self.db and self.db.characters and self.db.characters[self.charKey] then
+        local existing = self.db.characters[self.charKey].professions or {}
+        for baseID, newData in pairs(profData) do
+            local cached = existing[baseID]
+            if cached then
+                if not newData.variantID and cached.variantID then
+                    newData.variantID = cached.variantID
+                end
+                if not newData.expansionName and cached.expansionName then
+                    newData.expansionName = cached.expansionName
+                end
+                if newData.hasSpec and (not newData.tabs or next(newData.tabs) == nil) then
+                    if cached.tabs and next(cached.tabs) ~= nil then
+                        newData.tabs = cached.tabs
+                        newData.totalKnowledgeSpent = cached.totalKnowledgeSpent or 0
+                        newData.unspentKnowledge = cached.unspentKnowledge or 0
+                    end
+                end
+            end
+        end
+    end
+
+    self:SaveCharacterData(profData, prof1BaseID, prof2BaseID)
+
+    local count = 0
+    for _ in pairs(profData) do count = count + 1 end
+    PK:Debug("Async scan complete: " .. count .. " profession(s) for " .. self.charKey)
 end
 
 function PK:IsBetterScan(newScan, oldScan)
@@ -616,16 +787,6 @@ local function SetupProfessionsBookButton()
     end
 end
 
-local function SetupProfessionButton()
-    if PK.profButtonReady then return end
-    if not PlayerSpellsFrame then return end
-
-    PK.profButtonReady = true
-    if PK.CreateProfessionButton then
-        PK:CreateProfessionButton()
-    end
-end
-
 ----------------------------------------------------------------------
 -- Event Frame
 ----------------------------------------------------------------------
@@ -638,10 +799,8 @@ f:SetScript("OnEvent", function(_, event, name)
         PK:InitStorage()
         PK:Print("v" .. PK.version .. " loaded. Type |cff00ccff/pk|r for help.")
 
-        -- Defer scan to let profession data load
-        C_Timer.After(4, function()
-            PK:ScanAllProfessions()
-        end)
+        -- Defer scan to let profession data load (async to avoid FPS hitch)
+        PK:ScheduleScan(4)
 
         -- Initialize guild sync (deferred to let guild data load)
         C_Timer.After(6, function()
@@ -657,8 +816,6 @@ f:SetScript("OnEvent", function(_, event, name)
     elseif event == "ADDON_LOADED" then
         if name == "Blizzard_Professions" then
             C_Timer.After(1, SetupProfessionUI)
-        elseif name == "Blizzard_PlayerSpells" then
-            C_Timer.After(1, SetupProfessionButton)
         elseif name == "Blizzard_ProfessionsBook" or name == "Blizzard_ProfessionBook" then
             C_Timer.After(1, SetupProfessionsBookButton)
         end
@@ -669,6 +826,10 @@ f:SetScript("OnEvent", function(_, event, name)
         end
 
     elseif event == "TRADE_SKILL_SHOW" then
+        -- Ensure profession frame is set up (fallback if ADDON_LOADED was missed)
+        if not PK.profFrameReady then
+            SetupProfessionUI()
+        end
         -- Also try ProfessionsBookFrame button here as a fallback
         if not PK.profBookButtonReady then
             SetupProfessionsBookButton()
@@ -676,13 +837,11 @@ f:SetScript("OnEvent", function(_, event, name)
         -- Profession window opened -- best time to scan
         C_Timer.After(0.5, function()
             PK:DeepScanCurrentProfession()
-            if PK.profFrameReady and PK.RefreshOverlay then
+            if PK.RefreshOverlay then
                 PK:RefreshOverlay()
             end
-            if PK.profFrameReady and PK.UpdateSpecTreeHighlights then
-                C_Timer.After(0.5, function()
-                    PK:UpdateSpecTreeHighlights()
-                end)
+            if PK.ScheduleHighlightUpdate then
+                PK:ScheduleHighlightUpdate(0.5)
             end
             -- Trigger a manual sync when the profession page opens
             PK:TriggerManualSync()
@@ -692,35 +851,29 @@ f:SetScript("OnEvent", function(_, event, name)
         -- Profession data has fully loaded -- good time for deep scan
         C_Timer.After(0.5, function()
             PK:DeepScanCurrentProfession()
-            if PK.profFrameReady and PK.RefreshOverlay then
+            if PK.RefreshOverlay then
                 PK:RefreshOverlay()
             end
-            if PK.profFrameReady and PK.UpdateSpecTreeHighlights then
-                C_Timer.After(0.5, function()
-                    PK:UpdateSpecTreeHighlights()
-                end)
+            if PK.ScheduleHighlightUpdate then
+                PK:ScheduleHighlightUpdate(0.5)
             end
         end)
 
     elseif event == "TRAIT_CONFIG_UPDATED" then
-        -- Spec points changed
+        -- Spec points changed — rescan (async) and force overlay refresh
         C_Timer.After(1, function()
-            PK:ScanAllProfessions()
-            if PK.profFrameReady and PK.RefreshOverlay then
+            if PK.RefreshOverlay then
                 PK:RefreshOverlay()
             end
-            if PK.profFrameReady and PK.UpdateSpecTreeHighlights then
-                C_Timer.After(0.5, function()
-                    PK:UpdateSpecTreeHighlights()
-                end)
+            if PK.ScheduleHighlightUpdate then
+                PK:ScheduleHighlightUpdate(0.5, true)  -- force cache rebuild
             end
         end)
+        PK:ScheduleScan(1.5)
 
     elseif event == "SKILL_LINES_CHANGED" then
-        -- Profession data loaded/changed
-        C_Timer.After(2, function()
-            PK:ScanAllProfessions()
-        end)
+        -- Profession data loaded/changed (async, debounced)
+        PK:ScheduleScan(2)
 
     elseif event == "GUILD_ROSTER_UPDATE" then
         -- Guild roster changed — prune departed members
