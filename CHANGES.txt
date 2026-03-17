@@ -1,3 +1,12 @@
+## v0.3.3 — Taint Fix (Crafting Bar)
+
+### Bug Fixes
+- Fixed "attempted to iterate a forbidden table" Lua error during profession crafting — direct frame setup calls in TRADE_SKILL_SHOW were tainting Blizzard's CastingBarFrame tables; all setup is now deferred to the next frame
+- Deep scan now skips when the player is actively crafting (casting/channeling), preventing taint propagation during craft events
+- DeepScanCurrentProfession no longer runs a synchronous full scan — uses async ScheduleScan to avoid blocking or tainting the current execution path
+
+---
+
 ## v0.3.2 — Overlay Reliability & Addon Compatibility
 
 ### Bug Fixes

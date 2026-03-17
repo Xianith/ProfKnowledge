@@ -751,7 +751,8 @@ function PK:DeepScanCurrentProfession()
     end
 
     -- Also do a full re-scan (variant IDs may have become available)
-    self:ScanAllProfessions()
+    -- Use async path to avoid tainting during crafting events
+    self:ScheduleScan(0.5)
 end
 
 ----------------------------------------------------------------------
@@ -826,15 +827,17 @@ f:SetScript("OnEvent", function(_, event, name)
         end
 
     elseif event == "TRADE_SKILL_SHOW" then
-        -- Ensure profession frame is set up (fallback if ADDON_LOADED was missed)
-        if not PK.profFrameReady then
-            SetupProfessionUI()
-        end
-        -- Also try ProfessionsBookFrame button here as a fallback
-        if not PK.profBookButtonReady then
-            SetupProfessionsBookButton()
-        end
-        -- Profession window opened -- best time to scan
+        -- Defer ALL frame setup to next frame to avoid tainting Blizzard's
+        -- execution path (direct calls here taint CastingBarFrame tables)
+        C_Timer.After(0, function()
+            if not PK.profFrameReady then
+                SetupProfessionUI()
+            end
+            if not PK.profBookButtonReady then
+                SetupProfessionsBookButton()
+            end
+        end)
+        -- Profession window opened -- best time to scan (deferred)
         C_Timer.After(0.5, function()
             PK:DeepScanCurrentProfession()
             if PK.RefreshOverlay then
@@ -849,7 +852,14 @@ f:SetScript("OnEvent", function(_, event, name)
 
     elseif event == "TRADE_SKILL_LIST_UPDATE" then
         -- Profession data has fully loaded -- good time for deep scan
+        -- Skip if player is actively crafting (avoids tainting casting bar)
         C_Timer.After(0.5, function()
+            local casting = UnitCastingInfo("player")
+            local channeling = UnitChannelInfo("player")
+            if casting or channeling then
+                PK:Debug("Skipping deep scan — player is crafting")
+                return
+            end
             PK:DeepScanCurrentProfession()
             if PK.RefreshOverlay then
                 PK:RefreshOverlay()
