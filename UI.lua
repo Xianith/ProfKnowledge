@@ -3476,7 +3476,7 @@ local function GetAHSelectedItemID()
         local itemList = AuctionHouseFrame.ItemBuyFrame.ItemList
         if itemList then
             -- Try to get selected result
-            local selIdx = itemList:GetSelectedEntry and itemList:GetSelectedEntry()
+            local selIdx = itemList.GetSelectedEntry and itemList:GetSelectedEntry()
             if selIdx and selIdx.GetRowData then
                 local rowData = selIdx:GetRowData()
                 if rowData and rowData.itemKey then
