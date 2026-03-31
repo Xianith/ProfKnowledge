@@ -332,6 +332,7 @@ function PK:ScanAllProfessions()
 
     -- Save (include prof slot assignments)
     self:SaveCharacterData(profData, prof1BaseID, prof2BaseID)
+    self:FireAPICallbacks("DATA_UPDATED")
 
     local count = 0
     for _ in pairs(profData) do count = count + 1 end
@@ -445,6 +446,7 @@ function PK:ScanAllProfessionsCoroutine()
     end
 
     self:SaveCharacterData(profData, prof1BaseID, prof2BaseID)
+    self:FireAPICallbacks("DATA_UPDATED")
 
     local count = 0
     for _ in pairs(profData) do count = count + 1 end
@@ -753,6 +755,84 @@ function PK:DeepScanCurrentProfession()
     -- Also do a full re-scan (variant IDs may have become available)
     -- Use async path to avoid tainting during crafting events
     self:ScheduleScan(0.5)
+
+    -- Scan recipes for the currently open profession
+    self:ScanCurrentRecipes()
+end
+
+----------------------------------------------------------------------
+-- Recipe scanning — stores learned recipes per character per profession
+-- Only works when the profession window is open (C_TradeSkillUI)
+----------------------------------------------------------------------
+
+function PK:ScanCurrentRecipes()
+    if not self.charKey or not self.db then return end
+    if not C_TradeSkillUI or not C_TradeSkillUI.GetAllRecipeIDs then return end
+
+    local ok, recipeIDs = pcall(C_TradeSkillUI.GetAllRecipeIDs)
+    if not ok or not recipeIDs or #recipeIDs == 0 then return end
+
+    -- Detect which profession we're scanning
+    local baseID = nil
+    local ok2, baseInfo = pcall(C_TradeSkillUI.GetBaseProfessionInfo)
+    if ok2 and baseInfo and baseInfo.professionID then
+        baseID = baseInfo.professionID
+    end
+    if not baseID then return end
+
+    local charData = self.db.characters and self.db.characters[self.charKey]
+    if not charData then return end
+    if not charData.professions then charData.professions = {} end
+    if not charData.professions[baseID] then charData.professions[baseID] = {} end
+
+    local learnedRecipes = {}
+    local count = 0
+
+    for _, recipeID in ipairs(recipeIDs) do
+        local rok, recipeInfo = pcall(C_TradeSkillUI.GetRecipeInfo, recipeID)
+        if rok and recipeInfo and recipeInfo.learned then
+            local itemName = recipeInfo.name or ""
+            local outputItemID = nil
+
+            -- Try to get the output item ID from recipe info
+            if recipeInfo.hyperlink then
+                local iID = recipeInfo.hyperlink:match("item:(%d+)")
+                if iID then outputItemID = tonumber(iID) end
+            end
+
+            -- Fallback: try GetRecipeOutputItemData
+            if not outputItemID and C_TradeSkillUI.GetRecipeOutputItemData then
+                local rok2, outputData = pcall(C_TradeSkillUI.GetRecipeOutputItemData, recipeID)
+                if rok2 and outputData and outputData.itemID then
+                    outputItemID = outputData.itemID
+                end
+            end
+
+            -- Get quality tier info from recipe schematic
+            local maxQuality = nil
+            if C_TradeSkillUI.GetRecipeSchematic then
+                local sok, schematic = pcall(C_TradeSkillUI.GetRecipeSchematic, recipeID, false)
+                if sok and schematic then
+                    -- qualityIDs table tells us how many quality tiers exist
+                    if schematic.qualityIDs and #schematic.qualityIDs > 0 then
+                        maxQuality = #schematic.qualityIDs
+                    end
+                end
+            end
+
+            learnedRecipes[recipeID] = {
+                name       = itemName,
+                itemID     = outputItemID,
+                difficulty = recipeInfo.difficulty,
+                maxQuality = maxQuality,
+            }
+            count = count + 1
+        end
+    end
+
+    charData.professions[baseID].learnedRecipes = learnedRecipes
+    charData.professions[baseID].recipeScanTime = time()
+    PK:Debug("Recipe scan: " .. count .. " learned recipes for profession " .. baseID)
 end
 
 ----------------------------------------------------------------------
@@ -803,6 +883,11 @@ f:SetScript("OnEvent", function(_, event, name)
         -- Defer scan to let profession data load (async to avoid FPS hitch)
         PK:ScheduleScan(4)
 
+        -- Scan concentration after profession data is available
+        C_Timer.After(5, function()
+            PK:ScanConcentration()
+        end)
+
         -- Initialize guild sync (deferred to let guild data load)
         C_Timer.After(6, function()
             if PK:GetSetting("guildSync") then
@@ -819,11 +904,29 @@ f:SetScript("OnEvent", function(_, event, name)
             C_Timer.After(1, SetupProfessionUI)
         elseif name == "Blizzard_ProfessionsBook" or name == "Blizzard_ProfessionBook" then
             C_Timer.After(1, SetupProfessionsBookButton)
+        elseif name == "Blizzard_ProfessionsCustomerOrders"
+            or name == "Blizzard_CraftingOrders"
+            or name == "Blizzard_WorkOrders" then
+            C_Timer.After(1, function()
+                if PK.SetupWorkOrdersOverlay then
+                    PK:SetupWorkOrdersOverlay()
+                end
+            end)
         end
 
         -- Fallback: try to attach PK button whenever any profession addon loads
         if ProfessionsBookFrame and not PK.profBookButtonReady then
             C_Timer.After(1, SetupProfessionsBookButton)
+        end
+
+        -- Fallback: try to attach work orders overlay whenever customer frame appears
+        if not PK.woSetupDone and PK.SetupWorkOrdersOverlay then
+            local custFrame = ProfessionsCustomerOrdersFrame or ProfessionsCustomerOrderFrame
+            if custFrame then
+                C_Timer.After(1, function()
+                    PK:SetupWorkOrdersOverlay()
+                end)
+            end
         end
 
     elseif event == "TRADE_SKILL_SHOW" then
@@ -836,6 +939,10 @@ f:SetScript("OnEvent", function(_, event, name)
             if not PK.profBookButtonReady then
                 SetupProfessionsBookButton()
             end
+            -- Fallback: set up work orders overlay if customer frame exists
+            if (ProfessionsCustomerOrdersFrame or ProfessionsCustomerOrderFrame) and PK.SetupWorkOrdersOverlay then
+                PK:SetupWorkOrdersOverlay()
+            end
         end)
         -- Profession window opened -- best time to scan (deferred)
         C_Timer.After(0.5, function()
@@ -845,6 +952,9 @@ f:SetScript("OnEvent", function(_, event, name)
             end
             if PK.ScheduleHighlightUpdate then
                 PK:ScheduleHighlightUpdate(0.5)
+            end
+            if PK.RefreshWorkOrdersPanel then
+                PK:RefreshWorkOrdersPanel()
             end
             -- Trigger a manual sync when the profession page opens
             PK:TriggerManualSync()

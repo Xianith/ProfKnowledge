@@ -2,7 +2,7 @@
 ## Title: |cff00ccffProf|r|cffffffffKnowledge|r
 ## Notes: Track profession knowledge across all characters and sync with guild members.
 ## Author: Claude & Friends
-## Version: 0.3.3
+## Version: 0.4.0
 ## SavedVariables: ProfKnowledgeDB
 ## IconTexture: Interface\Icons\INV_Misc_Book_11
 ## X-Category: Professions
@@ -15,3 +15,4 @@ Storage.lua
 Comm.lua
 Sync.lua
 UI.lua
+API.lua

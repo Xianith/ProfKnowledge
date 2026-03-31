@@ -21,6 +21,7 @@ local DB_DEFAULTS = {
         showAltPanel = true,   -- Alt Knowledge side panel
         showBadges   = true,
         guildSync    = true,   -- Enable guild sync by default
+        showWorkOrders = true, -- Work Orders alt info panel
         debug        = false,  -- /pk debug to toggle
     },
 }
@@ -152,6 +153,29 @@ function PK:GetCurrentCharacterData()
 end
 
 ----------------------------------------------------------------------
+-- Concentration scanning (per character, on login)
+----------------------------------------------------------------------
+
+function PK:ScanConcentration()
+    if not self.charKey or not self.db then return end
+    local charData = self.db.characters and self.db.characters[self.charKey]
+    if not charData or not charData.professions then return end
+
+    if not PK.ConcentrationCurrencyIDs then return end
+
+    for baseID, currencyID in pairs(PK.ConcentrationCurrencyIDs) do
+        if charData.professions[baseID] then
+            local ok, info = pcall(C_CurrencyInfo.GetCurrencyInfo, currencyID)
+            if ok and info then
+                charData.professions[baseID].concentration    = info.quantity or 0
+                charData.professions[baseID].maxConcentration = info.maxQuantity or 1000
+                PK:Debug("Concentration for " .. baseID .. ": " .. (info.quantity or 0) .. "/" .. (info.maxQuantity or 1000))
+            end
+        end
+    end
+end
+
+----------------------------------------------------------------------
 -- Cross-character queries
 ----------------------------------------------------------------------
 
@@ -193,6 +217,108 @@ function PK:GetAllCharactersForProfession(skillLineID, filterVariantID)
     end)
 
     return results
+end
+
+--- Find all characters that have learned a specific recipe (by recipeID).
+--- Returns: { { charKey, className, profData, recipeName }, ... }
+function PK:GetCraftersForRecipe(recipeID)
+    local results = {}
+    if not self.db or not self.db.characters then return results end
+
+    for charKey, charData in pairs(self.db.characters) do
+        if charData.professions then
+            for baseID, profData in pairs(charData.professions) do
+                if profData.learnedRecipes and profData.learnedRecipes[recipeID] then
+                    local info = profData.learnedRecipes[recipeID]
+                    table.insert(results, {
+                        charKey    = charKey,
+                        className  = charData.className,
+                        profData   = profData,
+                        recipeName = info.name or "?",
+                        baseID     = baseID,
+                    })
+                    break  -- one match per character is enough
+                end
+            end
+        end
+    end
+
+    local currentKey = self.charKey
+    table.sort(results, function(a, b)
+        if a.charKey == currentKey then return true end
+        if b.charKey == currentKey then return false end
+        -- Sort by skill level descending (best crafter first)
+        local aSkill = a.profData and a.profData.skillLevel or 0
+        local bSkill = b.profData and b.profData.skillLevel or 0
+        if aSkill ~= bSkill then return aSkill > bSkill end
+        return a.charKey < b.charKey
+    end)
+
+    return results
+end
+
+--- Find all characters that can craft a specific item (by output itemID).
+--- Returns: { { charKey, className, profData, recipeName, recipeID }, ... }
+function PK:GetCraftersForItem(itemID)
+    local results = {}
+    if not itemID or not self.db or not self.db.characters then return results end
+
+    for charKey, charData in pairs(self.db.characters) do
+        if charData.professions then
+            for baseID, profData in pairs(charData.professions) do
+                if profData.learnedRecipes then
+                    for recipeID, info in pairs(profData.learnedRecipes) do
+                        if info.itemID == itemID then
+                            table.insert(results, {
+                                charKey    = charKey,
+                                className  = charData.className,
+                                profData   = profData,
+                                recipeName = info.name or "?",
+                                recipeID   = recipeID,
+                                baseID     = baseID,
+                            })
+                            break
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    local currentKey = self.charKey
+    table.sort(results, function(a, b)
+        if a.charKey == currentKey then return true end
+        if b.charKey == currentKey then return false end
+        local aSkill = a.profData and a.profData.skillLevel or 0
+        local bSkill = b.profData and b.profData.skillLevel or 0
+        if aSkill ~= bSkill then return aSkill > bSkill end
+        return a.charKey < b.charKey
+    end)
+
+    return results
+end
+
+--- Build a lookup set of all item IDs that any character can craft.
+--- Returns: { [itemID] = true, ... }
+function PK:GetAllCraftableItemIDs()
+    local items = {}
+    if not self.db or not self.db.characters then return items end
+
+    for _, charData in pairs(self.db.characters) do
+        if charData.professions then
+            for _, profData in pairs(charData.professions) do
+                if profData.learnedRecipes then
+                    for _, info in pairs(profData.learnedRecipes) do
+                        if info.itemID then
+                            items[info.itemID] = true
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    return items
 end
 
 --- Get all characters and their professions (for summary window).

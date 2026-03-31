@@ -573,6 +573,7 @@ local function OnSyncResp(self, sender, payload, distribution)
         end
     end
 
+    if merged > 0 then self:FireAPICallbacks("DATA_UPDATED") end
     PK:Debug("Sync response chunk " .. chunkIndex .. "/" .. chunkTotal
         .. " from " .. sender .. " (merged " .. merged .. ")")
 
@@ -625,6 +626,7 @@ local function OnSyncPush(self, sender, payload, distribution)
         end
     end
 
+    if merged > 0 then self:FireAPICallbacks("DATA_UPDATED") end
     PK:Debug("Sync push from " .. sender .. " (merged " .. merged .. ")")
     -- DR no longer rebroadcasts push data as deltas — each member
     -- broadcasts their own deltas directly, avoiding amplification.
@@ -645,6 +647,7 @@ local function OnDelta(self, sender, payload, distribution)
     end
 
     if self:MergeGuildMember(charKey, data) then
+        self:FireAPICallbacks("DATA_UPDATED")
         PK:Debug("Delta update: merged " .. charKey .. " from " .. sender)
     end
 end

@@ -67,6 +67,28 @@ SlashCmdList["PROFKNOWLEDGE"] = function(msg)
             end
         end
 
+    elseif cmd == "frames" then
+        PK:Print("Frame discovery:")
+        local tryNames = {
+            "ProfessionsCustomerOrdersFrame",
+            "ProfessionsCustomerOrderFrame",
+            "ProfessionsFrame",
+        }
+        for _, name in ipairs(tryNames) do
+            local frame = _G[name]
+            if frame then
+                local shown = frame:IsShown() and "|cff00ff00SHOWN|r" or "|cffff0000hidden|r"
+                PK:Print("  " .. name .. " — " .. shown)
+            else
+                PK:Print("  " .. name .. " — |cff888888not found|r")
+            end
+        end
+        -- Also check OrdersPage
+        if ProfessionsFrame and ProfessionsFrame.OrdersPage then
+            local shown = ProfessionsFrame.OrdersPage:IsShown() and "|cff00ff00SHOWN|r" or "|cffff0000hidden|r"
+            PK:Print("  ProfessionsFrame.OrdersPage — " .. shown)
+        end
+
     else
         PK:Print("Unknown command: " .. cmd .. ". Type |cff00ccff/pk help|r for a list.")
     end
@@ -2175,7 +2197,7 @@ end
 
 function PK:CreateOptionsPanel()
     local frame = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
-    frame:SetSize(280, 290)
+    frame:SetSize(280, 320)
     frame:SetPoint("CENTER")
     frame:SetMovable(true)
     frame:EnableMouse(true)
@@ -2216,6 +2238,13 @@ function PK:CreateOptionsPanel()
     CreateCheckbox(frame, "Alt Knowledge Panel", "showAltPanel", y, function()
         if PK.RefreshOverlay then
             PK:RefreshOverlay()
+        end
+    end)
+    y = y - 30
+
+    CreateCheckbox(frame, "Work Orders Alt Info", "showWorkOrders", y, function()
+        if PK.RefreshWorkOrdersPanel then
+            PK:RefreshWorkOrdersPanel()
         end
     end)
     y = y - 30
@@ -2543,4 +2572,753 @@ function PK:CreateImportWindow()
 
     frame:Hide()
     return frame
+end
+
+----------------------------------------------------------------------
+-- Work Orders — "Who Can Craft This" Panel + Green Highlights
+-- Hooks into the customer "Place Crafting Order" frame
+----------------------------------------------------------------------
+
+local woPanel = nil
+local woDebounceTimer = nil
+local woHooked = false
+local woCraftableItemCache = nil   -- cached set of craftable item IDs
+local woCraftableCacheTime = 0
+local woGuildCrafters = {}         -- { [spellID] = { { name, fullName, classFile, online }, ... } }
+local woGuildQuerySpellID = nil    -- currently pending guild recipe query
+local woGuildQuerySession = 0      -- increments per query to ignore stale results
+
+-- Try multiple possible frame names for the customer orders UI
+local function FindCustomerOrdersFrame()
+    -- Try known global names (Blizzard naming can vary between patches)
+    local names = {
+        "ProfessionsCustomerOrdersFrame",
+        "ProfessionsCustomerOrderFrame",
+    }
+    for _, name in ipairs(names) do
+        local frame = _G[name]
+        if frame then
+            PK:Debug("Work Orders: found frame '" .. name .. "'")
+            return frame, name
+        end
+    end
+    return nil, nil
+end
+
+local function ScheduleWorkOrdersRefresh(delay)
+    if woDebounceTimer then woDebounceTimer:Cancel() end
+    woDebounceTimer = C_Timer.NewTimer(delay or 0.3, function()
+        woDebounceTimer = nil
+        PK:RefreshWorkOrdersPanel()
+    end)
+end
+
+-- Invalidate craftable cache (call when recipe data changes)
+function PK:InvalidateCraftableCache()
+    woCraftableItemCache = nil
+    woCraftableCacheTime = 0
+end
+
+-- Get or rebuild the craftable items lookup set
+local function GetCraftableItemSet()
+    local now = GetTime()
+    if woCraftableItemCache and (now - woCraftableCacheTime) < 30 then
+        return woCraftableItemCache
+    end
+    woCraftableItemCache = PK:GetAllCraftableItemIDs()
+    woCraftableCacheTime = now
+    return woCraftableItemCache
+end
+
+----------------------------------------------------------------------
+-- Green highlighting on browse list rows
+----------------------------------------------------------------------
+
+local function ColorBrowseListRows(custFrame)
+    if not custFrame then return end
+    if PK:GetSetting("showWorkOrders") == false then return end
+
+    local craftable = GetCraftableItemSet()
+    if not craftable or not next(craftable) then return end
+
+    -- Walk children looking for the browse list / scroll box
+    -- The browse list rows typically have an item icon and name text
+    local function TryColorRows(parent)
+        if not parent then return end
+        local children = { parent:GetChildren() }
+        for _, child in ipairs(children) do
+            -- Look for list rows that have recipe or item data
+            local ok, result = pcall(function()
+                -- Try common Blizzard patterns for order list elements
+                if child.GetElementData then
+                    local data = child:GetElementData()
+                    if data then
+                        local itemID = data.itemID or (data.option and data.option.itemID)
+                        if itemID and craftable[itemID] then
+                            -- Add a green indicator
+                            if not child.pkCraftableIcon then
+                                local icon = child:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+                                icon:SetPoint("LEFT", child, "LEFT", 4, 0)
+                                icon:SetText("|cff00ff00✓|r")
+                                child.pkCraftableIcon = icon
+                            end
+                            child.pkCraftableIcon:Show()
+                            return true
+                        end
+                    end
+                end
+                -- Hide indicator if not craftable
+                if child.pkCraftableIcon then
+                    child.pkCraftableIcon:Hide()
+                end
+            end)
+            -- Recurse into child containers
+            if child.GetChildren then
+                TryColorRows(child)
+            end
+        end
+    end
+
+    pcall(TryColorRows, custFrame)
+end
+
+----------------------------------------------------------------------
+-- Setup: create panel and hook customer orders frame
+----------------------------------------------------------------------
+
+function PK:SetupWorkOrdersOverlay()
+    if woHooked then return end
+
+    local custFrame, frameName = FindCustomerOrdersFrame()
+    if not custFrame then
+        PK:Debug("Work Orders: customer orders frame not found")
+        return
+    end
+
+    woHooked = true
+    PK:Debug("Work Orders: hooking " .. (frameName or "?"))
+
+    local PANEL_W = 220
+    local ROW_H = 20
+
+    -- Create the sidebar panel matching Blizzard's crafting panel style
+    woPanel = CreateFrame("Frame", nil, custFrame)
+    woPanel:SetSize(PANEL_W, 160)
+    woPanel:SetFrameStrata("HIGH")
+
+    -- Dark background matching the crafting orders panel
+    local bg = woPanel:CreateTexture(nil, "BACKGROUND", nil, -8)
+    bg:SetAllPoints()
+    bg:SetColorTexture(0.06, 0.06, 0.06, 0.95)
+
+    -- Thin border lines (1px, matching Blizzard's inset style)
+    local function MakeBorder(point1, rel, point2, horiz)
+        local line = woPanel:CreateTexture(nil, "BORDER")
+        line:SetColorTexture(0.35, 0.30, 0.20, 0.8)
+        if horiz then
+            line:SetHeight(1)
+            line:SetPoint("TOPLEFT", woPanel, point1, 0, 0)
+            line:SetPoint("TOPRIGHT", woPanel, point2, 0, 0)
+        else
+            line:SetWidth(1)
+            line:SetPoint(point1, woPanel, point1, 0, 0)
+            line:SetPoint(point2, woPanel, point2, 0, 0)
+        end
+        return line
+    end
+    MakeBorder("TOPLEFT", woPanel, "TOPRIGHT", true)
+    MakeBorder("BOTTOMLEFT", woPanel, "BOTTOMRIGHT", true)
+    MakeBorder("TOPLEFT", woPanel, "BOTTOMLEFT", false)
+    MakeBorder("TOPRIGHT", woPanel, "BOTTOMRIGHT", false)
+
+    -- Anchor to the right of the customer orders frame
+    woPanel:SetPoint("TOPLEFT", custFrame, "TOPRIGHT", 2, -30)
+
+    -- Draggable
+    woPanel:SetMovable(true)
+    woPanel:EnableMouse(true)
+    woPanel:RegisterForDrag("LeftButton")
+    woPanel:SetScript("OnDragStart", woPanel.StartMoving)
+    woPanel:SetScript("OnDragStop", woPanel.StopMovingOrSizing)
+
+    -- Title area
+    local titleBg = woPanel:CreateTexture(nil, "ARTWORK", nil, -7)
+    titleBg:SetPoint("TOPLEFT", 1, -1)
+    titleBg:SetPoint("TOPRIGHT", -1, -1)
+    titleBg:SetHeight(24)
+    titleBg:SetColorTexture(0.12, 0.10, 0.08, 1)
+
+    local title = woPanel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    title:SetPoint("TOPLEFT", 8, -5)
+    title:SetPoint("TOPRIGHT", -8, -5)
+    title:SetJustifyH("LEFT")
+    title:SetWordWrap(false)
+    woPanel.title = title
+
+    -- Subtitle (recipe name)
+    local subtitle = woPanel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    subtitle:SetPoint("TOPLEFT", 8, -26)
+    subtitle:SetPoint("TOPRIGHT", -8, -26)
+    subtitle:SetJustifyH("LEFT")
+    subtitle:SetWordWrap(false)
+    subtitle:SetTextColor(0.8, 0.7, 0.5, 1)
+    woPanel.subtitle = subtitle
+
+    -- Divider below subtitle
+    local divider = woPanel:CreateTexture(nil, "ARTWORK")
+    divider:SetPoint("TOPLEFT", 6, -40)
+    divider:SetPoint("TOPRIGHT", -6, -40)
+    divider:SetHeight(1)
+    divider:SetColorTexture(0.35, 0.30, 0.20, 0.4)
+
+    -- Content area (holds row frames)
+    woPanel.contentChildren = {}
+    woPanel.rowPool = {}  -- reusable row frames
+
+    -- Hook frame hide → hide our panel and clear selected recipe state
+    custFrame:HookScript("OnHide", function()
+        if woPanel then woPanel:Hide() end
+        PK._woSelectedRecipe = nil
+        woGuildQuerySpellID = nil
+    end)
+
+    -- Helper: query guild for who knows a specific recipe
+    local function QueryGuildForRecipe(spellID)
+        if not spellID or not IsInGuild() then return end
+
+        woGuildQuerySession = woGuildQuerySession + 1
+        woGuildQuerySpellID = spellID
+
+        -- Ensure Blizzard_Communities is loaded (event won't fire without it)
+        if not C_AddOns.IsAddOnLoaded("Blizzard_Communities") then
+            C_AddOns.LoadAddOn("Blizzard_Communities")
+        end
+        -- Refresh guild tradeskill data
+        if QueryGuildRecipes then QueryGuildRecipes() end
+
+        -- Get the profession ID for this recipe (need expansion-specific ID for the query)
+        local profIDs = {}
+        if C_TradeSkillUI and C_TradeSkillUI.GetProfessionInfoByRecipeID then
+            local ok, profInfo = pcall(C_TradeSkillUI.GetProfessionInfoByRecipeID, spellID)
+            if ok and profInfo then
+                if profInfo.professionID and profInfo.professionID ~= 0 then
+                    table.insert(profIDs, profInfo.professionID)
+                end
+                if profInfo.parentProfessionID and profInfo.parentProfessionID ~= 0
+                   and profInfo.parentProfessionID ~= profInfo.professionID then
+                    table.insert(profIDs, profInfo.parentProfessionID)
+                end
+            end
+        end
+
+        -- Also try guild tradeskill list professions as fallback
+        if GetNumGuildTradeSkill then
+            local count = GetNumGuildTradeSkill() or 0
+            local seen = {}
+            for _, id in ipairs(profIDs) do seen[id] = true end
+            for i = 1, count do
+                local skillID, _, _, headerName, _, _, numPlayers = GetGuildTradeSkillInfo(i)
+                if skillID and numPlayers and numPlayers > 0 and not seen[skillID] then
+                    table.insert(profIDs, skillID)
+                    seen[skillID] = true
+                end
+            end
+        end
+
+        -- Try each profession ID until one succeeds
+        local session = woGuildQuerySession
+        local function tryNext(idx)
+            if session ~= woGuildQuerySession then return end  -- stale
+            if idx > #profIDs then
+                PK:Debug("WO: Guild query exhausted all profIDs, no results")
+                return
+            end
+            local pid = profIDs[idx]
+            PK:Debug("WO: QueryGuildMembersForRecipe profID=" .. pid .. " spell=" .. spellID)
+            local ok = pcall(C_GuildInfo.QueryGuildMembersForRecipe, pid, spellID, 1)
+            if not ok then
+                -- This profID doesn't work, try next
+                tryNext(idx + 1)
+                return
+            end
+            -- Timeout: if no response in 2s, try next profID
+            C_Timer.After(2, function()
+                if session ~= woGuildQuerySession and woGuildQuerySpellID ~= spellID then
+                    tryNext(idx + 1)
+                end
+            end)
+        end
+
+        if #profIDs > 0 then
+            tryNext(1)
+        end
+    end
+
+    -- Listen for guild recipe query results
+    local guildRecipeFrame = CreateFrame("Frame")
+    guildRecipeFrame:RegisterEvent("GUILD_RECIPE_KNOWN_BY_MEMBERS")
+    guildRecipeFrame:SetScript("OnEvent", function()
+        if not GetGuildRecipeInfoPostQuery then return end
+        local skillLine, recipeID, numMembers = GetGuildRecipeInfoPostQuery()
+        PK:Debug("WO: GUILD_RECIPE_KNOWN_BY_MEMBERS spell=" .. tostring(recipeID)
+            .. " members=" .. tostring(numMembers))
+
+        if not recipeID then return end
+
+        local crafters = {}
+        if numMembers and numMembers > 0 and GetGuildRecipeMember then
+            for i = 1, numMembers do
+                local displayName, fullName, classFileName, online = GetGuildRecipeMember(i)
+                table.insert(crafters, {
+                    name      = displayName or "?",
+                    fullName  = fullName or displayName or "?",
+                    classFile = classFileName or "WARRIOR",
+                    online    = online or false,
+                })
+            end
+        end
+
+        -- Cache results and refresh panel
+        woGuildCrafters[recipeID] = crafters
+        PK:Debug("WO: Cached " .. #crafters .. " guild crafters for recipe " .. recipeID)
+
+        -- Refresh the panel to show updated guild crafter info
+        if PK._woSelectedRecipe and PK._woSelectedRecipe.spellID == recipeID then
+            ScheduleWorkOrdersRefresh(0.1)
+        end
+    end)
+
+    -- Hook recipe selection via EventRegistry (fires when player picks a recipe)
+    if EventRegistry and EventRegistry.RegisterCallback then
+        EventRegistry:RegisterCallback(
+            "ProfessionsCustomerOrders.RecipeSelected",
+            function(_, recipeItemID, spellID, skillLineAbilityID, unusableBOP)
+                PK:Debug("WO: RecipeSelected itemID=" .. tostring(recipeItemID)
+                    .. " spellID=" .. tostring(spellID))
+                PK._woSelectedRecipe = {
+                    itemID = recipeItemID,
+                    spellID = spellID,
+                    skillLineAbilityID = skillLineAbilityID,
+                }
+                -- Query guild for who knows this recipe
+                QueryGuildForRecipe(spellID)
+                ScheduleWorkOrdersRefresh(0.15)
+            end,
+            "ProfKnowledge"
+        )
+        PK:Debug("Work Orders: hooked ProfessionsCustomerOrders.RecipeSelected")
+    else
+        PK:Debug("Work Orders: EventRegistry not available, using OnShow fallback")
+        custFrame:HookScript("OnShow", function()
+            C_Timer.After(0.5, function()
+                ScheduleWorkOrdersRefresh(0.5)
+            end)
+        end)
+    end
+
+    -- Also hook recraft item selection (no public event fires)
+    if custFrame.Form and custFrame.Form.SetRecraftItemGUID then
+        hooksecurefunc(custFrame.Form, "SetRecraftItemGUID", function(_, itemGUID)
+            if not itemGUID then return end
+            local ok, craftRecipeID = pcall(C_TradeSkillUI.GetOriginalCraftRecipeID, itemGUID)
+            if ok and craftRecipeID then
+                PK:Debug("WO: Recraft selected spellID=" .. tostring(craftRecipeID))
+                PK._woSelectedRecipe = { spellID = craftRecipeID }
+                QueryGuildForRecipe(craftRecipeID)
+                ScheduleWorkOrdersRefresh(0.15)
+            end
+        end)
+        PK:Debug("Work Orders: hooked recraft selection")
+    end
+
+    woPanel:Hide()
+    PK:Debug("Work Orders panel created and hooked")
+end
+
+----------------------------------------------------------------------
+-- Refresh: populate the "Who Can Craft" panel
+----------------------------------------------------------------------
+
+function PK:RefreshWorkOrdersPanel()
+    if not woPanel then PK:Debug("WO: no panel"); return end
+    if PK:GetSetting("showWorkOrders") == false then
+        PK:Debug("WO: setting disabled")
+        woPanel:Hide()
+        return
+    end
+
+    local custFrame = FindCustomerOrdersFrame()
+    if not custFrame or not custFrame:IsShown() then
+        PK:Debug("WO: custFrame not shown")
+        woPanel:Hide()
+        return
+    end
+
+    -- Try to color browse list rows (green highlights)
+    pcall(ColorBrowseListRows, custFrame)
+
+    -- Detect profession — primary: use spellID from RecipeSelected event
+    local baseID = nil
+    local profName = "Unknown"
+    local selectedSpellID = PK._woSelectedRecipe and PK._woSelectedRecipe.spellID
+
+    if selectedSpellID and C_TradeSkillUI and C_TradeSkillUI.GetProfessionInfoByRecipeID then
+        local ok, profInfo = pcall(C_TradeSkillUI.GetProfessionInfoByRecipeID, selectedSpellID)
+        if ok and profInfo then
+            baseID = profInfo.parentProfessionID or profInfo.professionID
+            if baseID and baseID ~= 0 then
+                PK:Debug("WO: RecipeSelected spellID=" .. tostring(selectedSpellID)
+                    .. " -> baseID=" .. tostring(baseID))
+            else
+                baseID = nil
+            end
+        end
+    end
+
+    -- Fallback 1: C_TradeSkillUI.GetBaseProfessionInfo
+    if not baseID then
+        local ok, baseInfo = pcall(function()
+            if C_TradeSkillUI and C_TradeSkillUI.GetBaseProfessionInfo then
+                return C_TradeSkillUI.GetBaseProfessionInfo()
+            end
+        end)
+        if ok and baseInfo and baseInfo.professionID and baseInfo.professionID ~= 0 then
+            baseID = baseInfo.professionID
+            PK:Debug("WO: Fallback1 baseID=" .. tostring(baseID))
+        end
+    end
+
+    -- Fallback 2: Form.ProfessionText FontString
+    if not baseID and custFrame then
+        pcall(function()
+            local form = custFrame.Form
+            if not form then return end
+            local profText = form.ProfessionText
+            if profText and profText.GetText then
+                local text = profText:GetText()
+                if text and text ~= "" then
+                    for bid, info in pairs(PK.ProfessionData) do
+                        if PK.CraftingProfessions[bid] and text:find(info.name) then
+                            baseID = bid
+                            PK:Debug("WO: Fallback2 ProfessionText matched " .. info.name)
+                            break
+                        end
+                    end
+                end
+            end
+        end)
+    end
+
+    -- Resolve profession name
+    if baseID then
+        local profInfo = PK.ProfessionData and PK.ProfessionData[baseID]
+        if profInfo then profName = profInfo.name end
+    end
+
+    if not baseID then
+        PK:Debug("WO: no profession detected — hiding panel")
+        woPanel:Hide()
+        return
+    end
+
+    -- Only show for crafting professions
+    if not PK.CraftingProfessions or not PK.CraftingProfessions[baseID] then
+        PK:Debug("WO: baseID " .. tostring(baseID) .. " not a crafting profession")
+        woPanel:Hide()
+        return
+    end
+
+    -- Get local alts and guild members with this profession (from PK's own data)
+    local alts = PK:GetAllCharactersForProfession(baseID) or {}
+    local guildAlts = PK:GetGuildCharactersForProfession(baseID) or {}
+
+    -- Merge PK guild roster data (synced characters)
+    local seen = {}
+    for _, a in ipairs(alts) do
+        seen[a.charKey] = true
+        a.source = "local"
+    end
+    for _, g in ipairs(guildAlts) do
+        if not seen[g.charKey] then
+            g.source = "guild"
+            table.insert(alts, g)
+            seen[g.charKey] = true
+        end
+    end
+
+    -- Build a lookup of guild crafters from the live API query
+    local guildCrafterSet = {}  -- [shortName] = { classFile, online, fullName }
+    if selectedSpellID and woGuildCrafters[selectedSpellID] then
+        for _, gc in ipairs(woGuildCrafters[selectedSpellID]) do
+            local shortName = gc.name:match("^([^-]+)") or gc.name
+            guildCrafterSet[shortName] = gc
+            guildCrafterSet[gc.fullName] = gc
+            guildCrafterSet[gc.name] = gc
+        end
+    end
+
+    -- Mark existing alts with guild-confirmed recipe knowledge
+    for _, alt in ipairs(alts) do
+        local shortName = alt.charKey:match("^([^-]+)") or alt.charKey
+        local gc = guildCrafterSet[alt.charKey] or guildCrafterSet[shortName]
+        if gc then
+            alt.guildConfirmedRecipe = true
+            alt.guildOnline = gc.online
+            -- Remove from set so we don't add them as duplicates below
+            guildCrafterSet[alt.charKey] = nil
+            guildCrafterSet[shortName] = nil
+            if gc.fullName then guildCrafterSet[gc.fullName] = nil end
+            if gc.name then guildCrafterSet[gc.name] = nil end
+        end
+    end
+
+    -- Add guild crafters from the live query that we don't already have in our PK data
+    local addedFromGuild = {}
+    if selectedSpellID and woGuildCrafters[selectedSpellID] then
+        for _, gc in ipairs(woGuildCrafters[selectedSpellID]) do
+            local shortName = gc.name:match("^([^-]+)") or gc.name
+            -- Only add if not already in our list (check by all possible keys)
+            if guildCrafterSet[gc.fullName] or guildCrafterSet[shortName] or guildCrafterSet[gc.name] then
+                if not addedFromGuild[gc.fullName] then
+                    addedFromGuild[gc.fullName] = true
+                    table.insert(alts, {
+                        charKey   = gc.fullName,
+                        className = gc.classFile,  -- classFile, not className
+                        classFile = gc.classFile,
+                        profData  = { skillLevel = 0, maxSkillLevel = 0 },
+                        source    = "guild_live",
+                        guildConfirmedRecipe = true,
+                        guildOnline = gc.online,
+                    })
+                end
+            end
+        end
+    end
+
+    if #alts == 0 then
+        PK:Debug("WO: no characters found for baseID " .. tostring(baseID))
+        woPanel:Hide()
+        return
+    end
+
+    PK:Debug("WO: showing panel for " .. profName .. " (" .. #alts .. " characters)")
+
+    -- Helper: determine recipe status for a character
+    local function getRecipeStatus(alt)
+        if alt.guildConfirmedRecipe then return "confirmed" end
+        if selectedSpellID and alt.profData and alt.profData.learnedRecipes then
+            local info = alt.profData.learnedRecipes[selectedSpellID]
+            if info then return "local_known", info end
+            return "local_unknown"
+        end
+        return "unknown"
+    end
+
+    -- Filter: only show characters who can craft (confirmed or local_known)
+    local crafters = {}
+    for _, alt in ipairs(alts) do
+        local skillLevel = alt.profData and alt.profData.skillLevel or 0
+        local maxSkill   = alt.profData and alt.profData.maxSkillLevel or 0
+        local status, recipeInfo = getRecipeStatus(alt)
+        if status == "confirmed" or status == "local_known" then
+            alt._recipeStatus = status
+            alt._recipeInfo = recipeInfo
+            table.insert(crafters, alt)
+        end
+    end
+
+    -- Sort: online first, then by skill level desc
+    table.sort(crafters, function(a, b)
+        local aOnline = a.guildOnline and 1 or 0
+        local bOnline = b.guildOnline and 1 or 0
+        if aOnline ~= bOnline then return aOnline > bOnline end
+        local aSkill = a.profData and a.profData.skillLevel or 0
+        local bSkill = b.profData and b.profData.skillLevel or 0
+        if aSkill ~= bSkill then return aSkill > bSkill end
+        return (a.charKey or "") < (b.charKey or "")
+    end)
+
+    -- Clear previous content
+    for _, child in ipairs(woPanel.contentChildren) do
+        child:Hide()
+    end
+    wipe(woPanel.contentChildren)
+    for _, row in ipairs(woPanel.rowPool or {}) do
+        row:Hide()
+    end
+
+    -- Update title & subtitle
+    local recipeName = nil
+    if selectedSpellID then
+        local spellName = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(selectedSpellID)
+        if not spellName and GetSpellInfo then
+            spellName = GetSpellInfo(selectedSpellID)
+        end
+        recipeName = spellName
+    end
+    woPanel.title:SetText("|cff00ccffProfKnowledge|r")
+    woPanel.subtitle:SetText(recipeName or profName)
+
+    if #crafters == 0 then
+        -- Show "no crafters" message
+        local noResult = woPanel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        noResult:SetPoint("TOPLEFT", 10, -48)
+        noResult:SetPoint("TOPRIGHT", -10, -48)
+        noResult:SetJustifyH("CENTER")
+        noResult:SetText("|cff666666No known crafters|r")
+        noResult:Show()
+        table.insert(woPanel.contentChildren, noResult)
+        woPanel:SetSize(220, 72)
+        woPanel:Show()
+        return
+    end
+
+    -- Build rows
+    local ROW_H = 20
+    local yOffset = -44
+    local shownCount = 0
+
+    for i, alt in ipairs(crafters) do
+        local charName = alt.charKey or "?"
+        local shortName = charName:match("^(.+)-") or charName
+
+        -- Get or create a row frame (clickable button)
+        local row = woPanel.rowPool[i]
+        if not row then
+            row = CreateFrame("Button", nil, woPanel)
+            row:SetHeight(ROW_H)
+
+            -- Hover highlight
+            local hl = row:CreateTexture(nil, "HIGHLIGHT")
+            hl:SetAllPoints()
+            hl:SetColorTexture(1, 1, 1, 0.06)
+
+            -- Status orb (online/offline indicator)
+            local orb = row:CreateTexture(nil, "ARTWORK")
+            orb:SetSize(8, 8)
+            orb:SetPoint("LEFT", 6, 0)
+            orb:SetTexture("Interface\\COMMON\\Indicator-Green")  -- will recolor
+            row._orb = orb
+
+            -- Name text
+            local name = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            name:SetPoint("LEFT", orb, "RIGHT", 5, 0)
+            name:SetJustifyH("LEFT")
+            name:SetWordWrap(false)
+            row._name = name
+
+            -- Right-side info (skill level / quality)
+            local info = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            info:SetPoint("RIGHT", row, "RIGHT", -6, 0)
+            info:SetJustifyH("RIGHT")
+            info:SetWordWrap(false)
+            row._info = info
+
+            woPanel.rowPool[i] = row
+        end
+
+        row:SetPoint("TOPLEFT", woPanel, "TOPLEFT", 1, yOffset)
+        row:SetPoint("RIGHT", woPanel, "RIGHT", -1, 0)
+
+        -- Online/offline orb
+        if alt.guildOnline then
+            row._orb:SetTexture("Interface\\COMMON\\Indicator-Green")
+            row._orb:SetDesaturated(false)
+        else
+            row._orb:SetTexture("Interface\\COMMON\\Indicator-Gray")
+            row._orb:SetDesaturated(false)
+        end
+
+        -- Class-colored name
+        local classColor
+        if alt.classFile and RAID_CLASS_COLORS and RAID_CLASS_COLORS[alt.classFile] then
+            local cc = RAID_CLASS_COLORS[alt.classFile]
+            classColor = string.format("|cff%02x%02x%02x", cc.r * 255, cc.g * 255, cc.b * 255)
+        else
+            classColor = PK.ClassColors and (PK.ClassColors[alt.className] or PK.ClassColors[alt.classFile]) or "|cffffffff"
+        end
+        row._name:SetText(classColor .. shortName .. "|r")
+        row._name:SetWidth(110)
+
+        -- Right side: skill level + quality tiers
+        local skillLevel = alt.profData and alt.profData.skillLevel or 0
+        local maxSkill   = alt.profData and alt.profData.maxSkillLevel or 0
+        local rightText = ""
+        if skillLevel > 0 or maxSkill > 0 then
+            rightText = "|cffffd100" .. skillLevel .. "/" .. maxSkill .. "|r"
+        end
+        -- Show quality tier pips if we have local recipe info
+        if alt._recipeInfo and alt._recipeInfo.maxQuality and alt._recipeInfo.maxQuality > 0 then
+            local pips = ""
+            for q = 1, alt._recipeInfo.maxQuality do
+                pips = pips .. "|A:Professions-Icon-Quality-Tier" .. q .. "-Small:0:0|a"
+            end
+            rightText = pips .. " " .. rightText
+        end
+        row._info:SetText(rightText)
+
+        -- Store data for click handler
+        row._charKey = alt.charKey
+        row._fullName = alt.charKey  -- charKey is "Name-Realm"
+        row._shortName = shortName
+
+        -- Click to fill the "To:" recipient field on the crafting order form
+        row:SetScript("OnClick", function(self, button)
+            if button == "LeftButton" then
+                local form = ProfessionsCustomerOrdersFrame and ProfessionsCustomerOrdersFrame.Form
+                local editBox = form and form.OrderRecipientTarget
+                if editBox then
+                    editBox:SetText(self._fullName)
+                    PK:Debug("WO: Set order recipient to " .. self._fullName)
+                end
+            end
+        end)
+
+        -- Tooltip on hover
+        row:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetText(classColor .. self._shortName .. "|r")
+            local pd = alt.profData
+            if pd then
+                if (pd.skillLevel or 0) > 0 then
+                    GameTooltip:AddLine(profName .. " " .. (pd.skillLevel or 0) .. "/" .. (pd.maxSkillLevel or 0), 1, 0.82, 0)
+                end
+                if pd.concentration and pd.concentration > 0 then
+                    GameTooltip:AddLine("Concentration: " .. pd.concentration .. "/" .. (pd.maxConcentration or 1000), 0.7, 0.7, 0.7)
+                end
+                if pd.totalKnowledgeSpent and pd.totalKnowledgeSpent > 0 then
+                    local kText = pd.totalKnowledgeSpent .. " spent"
+                    if pd.unspentKnowledge and pd.unspentKnowledge > 0 then
+                        kText = kText .. ", " .. pd.unspentKnowledge .. " unspent"
+                    end
+                    GameTooltip:AddLine("Knowledge: " .. kText, 0.7, 0.7, 0.7)
+                end
+            end
+            if alt.guildOnline then
+                GameTooltip:AddLine("Online", 0.18, 0.8, 0.44)
+            elseif alt.guildOnline == false then
+                GameTooltip:AddLine("Offline", 0.58, 0.65, 0.65)
+            end
+            GameTooltip:AddLine(" ")
+            GameTooltip:AddLine("Click to set as order recipient", 0.5, 0.5, 0.5)
+            GameTooltip:Show()
+        end)
+        row:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+        row:Show()
+        table.insert(woPanel.contentChildren, row)
+
+        yOffset = yOffset - ROW_H
+        shownCount = shownCount + 1
+    end
+
+    if shownCount == 0 then
+        woPanel:Hide()
+        return
+    end
+
+    -- Resize panel to fit content
+    local totalHeight = math.abs(yOffset) + 8
+    woPanel:SetSize(220, math.max(totalHeight, 60))
+    woPanel:Show()
 end

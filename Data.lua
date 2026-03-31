@@ -87,6 +87,23 @@ PK.ProfessionVariants = {
 --  but Midnight may change this — we check dynamically)
 ----------------------------------------------------------------------
 
+----------------------------------------------------------------------
+-- Concentration currency IDs (The War Within)
+-- Used to query current concentration via C_CurrencyInfo.GetCurrencyInfo()
+-- NOTE: These IDs may need in-game verification per expansion
+----------------------------------------------------------------------
+
+PK.ConcentrationCurrencyIDs = {
+    [171]  = 3054,  -- Alchemy
+    [164]  = 3058,  -- Blacksmithing
+    [333]  = 3046,  -- Enchanting
+    [202]  = 3050,  -- Engineering
+    [773]  = 3043,  -- Inscription
+    [755]  = 3060,  -- Jewelcrafting
+    [165]  = 3056,  -- Leatherworking
+    [197]  = 3041,  -- Tailoring
+}
+
 PK.CraftingProfessions = {
     [171]  = true,  -- Alchemy
     [164]  = true,  -- Blacksmithing
