@@ -22,6 +22,7 @@ local DB_DEFAULTS = {
         showBadges   = true,
         guildSync    = true,   -- Enable guild sync by default
         showWorkOrders = true, -- Work Orders alt info panel
+        showAHGuilt  = true,   -- AH guilt trip for craftable items
         debug        = false,  -- /pk debug to toggle
     },
 }

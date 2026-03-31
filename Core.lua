@@ -912,6 +912,12 @@ f:SetScript("OnEvent", function(_, event, name)
                     PK:SetupWorkOrdersOverlay()
                 end
             end)
+        elseif name == "Blizzard_AuctionHouseUI" then
+            C_Timer.After(1, function()
+                if PK.SetupAuctionHouseGuilt then
+                    PK:SetupAuctionHouseGuilt()
+                end
+            end)
         end
 
         -- Fallback: try to attach PK button whenever any profession addon loads

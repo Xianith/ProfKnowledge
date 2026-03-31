@@ -50,6 +50,11 @@ SlashCmdList["PROFKNOWLEDGE"] = function(msg)
         PK:SetSetting("debug", not current)
         PK:Print("Debug mode: " .. (not current and "|cff00ff00ON|r" or "|cffff0000OFF|r"))
 
+    elseif cmd == "guilt" then
+        local current = PK:GetSetting("showAHGuilt")
+        PK:SetSetting("showAHGuilt", not current)
+        PK:Print("AH guilt trip: " .. (not current and "|cff00ff00ON|r" or "|cffff0000OFF|r"))
+
     elseif cmd == "guild" then
         PK:HandleSyncCommand(strtrim(rest))
 
@@ -3321,4 +3326,466 @@ function PK:RefreshWorkOrdersPanel()
     local totalHeight = math.abs(yOffset) + 8
     woPanel:SetSize(220, math.max(totalHeight, 60))
     woPanel:Show()
+end
+
+----------------------------------------------------------------------
+-- Auction House "Guilt Trip" Feature
+-- When buying a craftable item, delays the buy button and shows guild
+-- crafters who could make it instead.
+----------------------------------------------------------------------
+
+local ahGuiltPanel = nil
+local ahGuiltTimer = nil
+local ahGuiltOverlay = nil  -- click-blocking overlay on buy buttons
+local ahGuiltCountdown = 0
+local ahGuiltActive = false
+local AH_GUILT_DELAY = 15  -- seconds
+local HideGuiltOverlay  -- forward declaration
+
+-- Guilt messages that rotate
+local GUILT_MESSAGES = {
+    "A guildie can make this...",
+    "Why not ask a friend?",
+    "Your guild crafters need love too.",
+    "Support local guild crafters!",
+    "Think of the guild economy!",
+    "You know someone who makes this.",
+    "Is the AH really necessary?",
+}
+
+--- Look up guild crafters for an itemID. Returns up to 3 crafters
+--- with online status, sorted online-first.
+local function FindGuildCraftersForItem(itemID)
+    if not itemID or not PK.db then return nil end
+
+    -- Check local alts first
+    local localCrafters = PK:GetCraftersForItem(itemID) or {}
+
+    -- Check guild roster
+    local guildCrafters = {}
+    local guildRoster = PK:GetGuildRoster()
+    if guildRoster then
+        for charKey, entry in pairs(guildRoster) do
+            if entry.professions then
+                for baseID, profData in pairs(entry.professions) do
+                    if profData.learnedRecipes then
+                        for recipeID, info in pairs(profData.learnedRecipes) do
+                            if info.itemID == itemID then
+                                table.insert(guildCrafters, {
+                                    charKey    = charKey,
+                                    className  = entry.className,
+                                    classFile  = entry.classFile,
+                                    recipeName = info.name or "?",
+                                    maxQuality = info.maxQuality,
+                                    skillLevel = profData.skillLevel or 0,
+                                })
+                                break
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    -- Merge, dedup
+    local seen = {}
+    local all = {}
+    for _, c in ipairs(localCrafters) do
+        if not seen[c.charKey] then
+            seen[c.charKey] = true
+            c.source = "local"
+            table.insert(all, c)
+        end
+    end
+    for _, c in ipairs(guildCrafters) do
+        if not seen[c.charKey] then
+            seen[c.charKey] = true
+            c.source = "guild"
+            table.insert(all, c)
+        end
+    end
+
+    if #all == 0 then return nil end
+
+    -- Enrich with online status from guild roster
+    local numGuild = GetNumGuildMembers and GetNumGuildMembers() or 0
+    local onlineLookup = {}
+    for i = 1, numGuild do
+        local name, _, _, _, _, _, _, _, online = GetGuildRosterInfo(i)
+        if name then
+            onlineLookup[name] = online
+            local short = name:match("^([^-]+)")
+            if short then onlineLookup[short] = online end
+        end
+    end
+
+    for _, c in ipairs(all) do
+        local short = c.charKey:match("^([^-]+)") or c.charKey
+        if onlineLookup[c.charKey] ~= nil then
+            c.online = onlineLookup[c.charKey]
+        elseif onlineLookup[short] ~= nil then
+            c.online = onlineLookup[short]
+        end
+    end
+
+    -- Sort: online first, then by skill level desc
+    table.sort(all, function(a, b)
+        local aOn = a.online and 1 or 0
+        local bOn = b.online and 1 or 0
+        if aOn ~= bOn then return aOn > bOn end
+        local aSkill = a.skillLevel or (a.profData and a.profData.skillLevel or 0)
+        local bSkill = b.skillLevel or (b.profData and b.profData.skillLevel or 0)
+        if aSkill ~= bSkill then return aSkill > bSkill end
+        return (a.charKey or "") < (b.charKey or "")
+    end)
+
+    -- Return top 3
+    local top = {}
+    for i = 1, math.min(3, #all) do
+        top[i] = all[i]
+    end
+    return top
+end
+
+local ahLastCommodityItemID = nil  -- captured from COMMODITY_SEARCH_RESULTS_UPDATED
+
+--- Get the itemID from a Blizzard AH item/commodity selection
+local function GetAHSelectedItemID()
+    -- Most reliable: captured from the search results event
+    if ahLastCommodityItemID then return ahLastCommodityItemID end
+
+    if not AuctionHouseFrame then return nil end
+
+    -- Try Blizzard default commodity buy frame
+    if AuctionHouseFrame.CommoditiesBuyFrame
+       and AuctionHouseFrame.CommoditiesBuyFrame:IsShown() then
+        -- Blizzard stores it as .itemID on the buy display
+        local buyDisplay = AuctionHouseFrame.CommoditiesBuyFrame.BuyDisplay
+        if buyDisplay then
+            local itemID = buyDisplay.ItemDisplay and buyDisplay.ItemDisplay.itemID
+            if itemID then return itemID end
+        end
+        -- Auctionator stores it as .expectedItemID
+        local expectedID = AuctionHouseFrame.CommoditiesBuyFrame.expectedItemID
+        if expectedID then return expectedID end
+    end
+
+    -- Try item buy (single auctions)
+    if AuctionHouseFrame.ItemBuyFrame and AuctionHouseFrame.ItemBuyFrame:IsShown() then
+        local itemList = AuctionHouseFrame.ItemBuyFrame.ItemList
+        if itemList then
+            -- Try to get selected result
+            local selIdx = itemList:GetSelectedEntry and itemList:GetSelectedEntry()
+            if selIdx and selIdx.GetRowData then
+                local rowData = selIdx:GetRowData()
+                if rowData and rowData.itemKey then
+                    return rowData.itemKey.itemID
+                end
+            end
+        end
+    end
+
+    return nil
+end
+
+--- Find the buy/buyout buttons to overlay
+local function GetAHBuyButtons()
+    local buttons = {}
+    if not AuctionHouseFrame then return buttons end
+
+    -- Commodity buy button
+    if AuctionHouseFrame.CommoditiesBuyFrame then
+        local buyFrame = AuctionHouseFrame.CommoditiesBuyFrame
+        if buyFrame.BuyDisplay and buyFrame.BuyDisplay.BuyButton then
+            table.insert(buttons, buyFrame.BuyDisplay.BuyButton)
+        end
+    end
+
+    -- Item buyout button
+    if AuctionHouseFrame.ItemBuyFrame then
+        local buyFrame = AuctionHouseFrame.ItemBuyFrame
+        if buyFrame.BuyoutButton then
+            table.insert(buttons, buyFrame.BuyoutButton)
+        end
+        if buyFrame.BidButton then
+            table.insert(buttons, buyFrame.BidButton)
+        end
+    end
+
+    return buttons
+end
+
+--- Create or update the guilt overlay that blocks buy buttons
+local function ShowGuiltOverlay(crafters)
+    local buttons = GetAHBuyButtons()
+    if #buttons == 0 then return end
+
+    -- Use the first buy button as anchor reference
+    local anchorBtn = buttons[1]
+
+    -- Create the blocking overlay (covers all buy buttons)
+    if not ahGuiltOverlay then
+        ahGuiltOverlay = CreateFrame("Button", "PKGuiltOverlay", UIParent)
+        ahGuiltOverlay:SetFrameStrata("DIALOG")
+        ahGuiltOverlay:SetFrameLevel(900)
+
+        local overlayBg = ahGuiltOverlay:CreateTexture(nil, "BACKGROUND")
+        overlayBg:SetAllPoints()
+        overlayBg:SetColorTexture(0.15, 0.05, 0.05, 0.85)
+        ahGuiltOverlay._bg = overlayBg
+
+        -- Countdown text on the overlay
+        local cdText = ahGuiltOverlay:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+        cdText:SetPoint("CENTER", 0, 0)
+        cdText:SetTextColor(1, 0.3, 0.3, 1)
+        ahGuiltOverlay._countdown = cdText
+
+        -- Eat all clicks
+        ahGuiltOverlay:SetScript("OnClick", function() end)
+        ahGuiltOverlay:RegisterForClicks("AnyUp", "AnyDown")
+    end
+
+    -- Position overlay to cover all buy buttons
+    ahGuiltOverlay:ClearAllPoints()
+    ahGuiltOverlay:SetPoint("TOPLEFT", anchorBtn, "TOPLEFT", -4, 4)
+    ahGuiltOverlay:SetPoint("BOTTOMRIGHT", anchorBtn, "BOTTOMRIGHT", 4, -4)
+
+    -- If multiple buttons, extend to cover them all
+    for i = 2, #buttons do
+        local btn = buttons[i]
+        if btn:IsShown() then
+            -- Extend the overlay to cover this button too
+            local _, _, _, bx, by = btn:GetPoint(1)
+            ahGuiltOverlay:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", 4, -4)
+        end
+    end
+
+    ahGuiltOverlay:Show()
+
+    -- Create the guilt panel (shows crafters below the buy area)
+    if not ahGuiltPanel then
+        ahGuiltPanel = CreateFrame("Frame", "PKGuiltPanel", UIParent)
+        ahGuiltPanel:SetFrameStrata("DIALOG")
+        ahGuiltPanel:SetFrameLevel(899)
+        ahGuiltPanel:SetSize(280, 100)
+
+        local panelBg = ahGuiltPanel:CreateTexture(nil, "BACKGROUND", nil, -8)
+        panelBg:SetAllPoints()
+        panelBg:SetColorTexture(0.06, 0.06, 0.06, 0.95)
+
+        -- Border
+        local function Border(p1, p2, horiz)
+            local ln = ahGuiltPanel:CreateTexture(nil, "BORDER")
+            ln:SetColorTexture(0.6, 0.2, 0.2, 0.6)
+            if horiz then
+                ln:SetHeight(1)
+                ln:SetPoint("TOPLEFT", ahGuiltPanel, p1, 0, 0)
+                ln:SetPoint("TOPRIGHT", ahGuiltPanel, p2, 0, 0)
+            else
+                ln:SetWidth(1)
+                ln:SetPoint(p1, ahGuiltPanel, p1, 0, 0)
+                ln:SetPoint(p2, ahGuiltPanel, p2, 0, 0)
+            end
+        end
+        Border("TOPLEFT", "TOPRIGHT", true)
+        Border("BOTTOMLEFT", "BOTTOMRIGHT", true)
+        Border("TOPLEFT", "BOTTOMLEFT", false)
+        Border("TOPRIGHT", "BOTTOMRIGHT", false)
+
+        -- Guilt message header
+        local header = ahGuiltPanel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        header:SetPoint("TOPLEFT", 10, -8)
+        header:SetPoint("TOPRIGHT", -10, -8)
+        header:SetJustifyH("CENTER")
+        header:SetTextColor(1, 0.4, 0.4, 1)
+        ahGuiltPanel._header = header
+
+        -- Divider
+        local div = ahGuiltPanel:CreateTexture(nil, "ARTWORK")
+        div:SetPoint("TOPLEFT", 8, -26)
+        div:SetPoint("TOPRIGHT", -8, -26)
+        div:SetHeight(1)
+        div:SetColorTexture(0.4, 0.2, 0.2, 0.4)
+
+        -- Row container
+        ahGuiltPanel._rows = {}
+    end
+
+    -- Pick a random guilt message
+    local guiltMsg = GUILT_MESSAGES[math.random(#GUILT_MESSAGES)]
+    ahGuiltPanel._header:SetText(guiltMsg)
+
+    -- Hide old rows
+    for _, row in ipairs(ahGuiltPanel._rows) do
+        row:Hide()
+    end
+
+    -- Build crafter rows
+    local yOffset = -32
+    for i, crafter in ipairs(crafters) do
+        local row = ahGuiltPanel._rows[i]
+        if not row then
+            row = CreateFrame("Frame", nil, ahGuiltPanel)
+            row:SetHeight(22)
+
+            local orb = row:CreateTexture(nil, "ARTWORK")
+            orb:SetSize(8, 8)
+            orb:SetPoint("LEFT", 8, 0)
+            row._orb = orb
+
+            local name = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+            name:SetPoint("LEFT", orb, "RIGHT", 6, 0)
+            name:SetJustifyH("LEFT")
+            name:SetWordWrap(false)
+            row._name = name
+
+            local info = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            info:SetPoint("RIGHT", row, "RIGHT", -8, 0)
+            info:SetJustifyH("RIGHT")
+            row._info = info
+
+            ahGuiltPanel._rows[i] = row
+        end
+
+        row:SetPoint("TOPLEFT", ahGuiltPanel, "TOPLEFT", 1, yOffset)
+        row:SetPoint("RIGHT", ahGuiltPanel, "RIGHT", -1, 0)
+
+        -- Online orb
+        if crafter.online then
+            row._orb:SetTexture("Interface\\COMMON\\Indicator-Green")
+        else
+            row._orb:SetTexture("Interface\\COMMON\\Indicator-Gray")
+        end
+
+        -- Class-colored name
+        local shortName = crafter.charKey:match("^([^-]+)") or crafter.charKey
+        local classFile = crafter.classFile or crafter.className
+        local classColor = "|cffffffff"
+        if classFile and RAID_CLASS_COLORS and RAID_CLASS_COLORS[classFile] then
+            local cc = RAID_CLASS_COLORS[classFile]
+            classColor = string.format("|cff%02x%02x%02x", cc.r * 255, cc.g * 255, cc.b * 255)
+        elseif crafter.className and PK.ClassColors and PK.ClassColors[crafter.className] then
+            classColor = PK.ClassColors[crafter.className]
+        end
+
+        local onlineText = crafter.online and " |cff2ecc71(Online)|r" or ""
+        row._name:SetText(classColor .. shortName .. "|r" .. onlineText)
+        row._name:SetWidth(160)
+
+        -- Quality pips on the right
+        local rightText = ""
+        local mq = crafter.maxQuality
+            or (crafter.profData and crafter.profData.learnedRecipes
+                and crafter._recipeInfo and crafter._recipeInfo.maxQuality)
+        if mq and mq > 0 then
+            for q = 1, mq do
+                rightText = rightText .. "|A:Professions-Icon-Quality-Tier" .. q .. "-Small:0:0|a"
+            end
+        end
+        row._info:SetText(rightText)
+
+        row:Show()
+        yOffset = yOffset - 22
+    end
+
+    -- Resize and position the panel
+    local panelHeight = math.abs(yOffset) + 10
+    ahGuiltPanel:SetSize(280, math.max(panelHeight, 50))
+    ahGuiltPanel:ClearAllPoints()
+    ahGuiltPanel:SetPoint("TOP", anchorBtn, "BOTTOM", 0, -6)
+    ahGuiltPanel:Show()
+
+    -- Start countdown
+    ahGuiltCountdown = AH_GUILT_DELAY
+    ahGuiltActive = true
+
+    if ahGuiltTimer then ahGuiltTimer:Cancel() end
+    ahGuiltOverlay._countdown:SetText(ahGuiltCountdown)
+
+    ahGuiltTimer = C_Timer.NewTicker(1, function()
+        ahGuiltCountdown = ahGuiltCountdown - 1
+        if ahGuiltCountdown > 0 then
+            ahGuiltOverlay._countdown:SetText(ahGuiltCountdown)
+        else
+            -- Time's up — remove the overlay, let them buy
+            HideGuiltOverlay()
+        end
+    end, AH_GUILT_DELAY)
+end
+
+HideGuiltOverlay = function()
+    ahGuiltActive = false
+    if ahGuiltTimer then
+        ahGuiltTimer:Cancel()
+        ahGuiltTimer = nil
+    end
+    if ahGuiltOverlay then ahGuiltOverlay:Hide() end
+    if ahGuiltPanel then ahGuiltPanel:Hide() end
+end
+
+--- Main check: called when AH selection changes
+local function CheckAHGuiltTrip()
+    if PK:GetSetting("showAHGuilt") == false then
+        HideGuiltOverlay()
+        return
+    end
+
+    local itemID = GetAHSelectedItemID()
+    if not itemID then
+        HideGuiltOverlay()
+        return
+    end
+
+    local crafters = FindGuildCraftersForItem(itemID)
+    if not crafters or #crafters == 0 then
+        HideGuiltOverlay()
+        return
+    end
+
+    PK:Debug("AH Guilt: found " .. #crafters .. " crafters for itemID " .. itemID)
+    ShowGuiltOverlay(crafters)
+end
+
+--- Setup: hook into the Auction House
+function PK:SetupAuctionHouseGuilt()
+    if not AuctionHouseFrame then return end
+    if self._ahGuiltHooked then return end
+    self._ahGuiltHooked = true
+
+    PK:Debug("AH Guilt: hooking Auction House")
+
+    -- Hook commodity selection changes
+    if AuctionHouseFrame.CommoditiesBuyFrame then
+        AuctionHouseFrame.CommoditiesBuyFrame:HookScript("OnShow", function()
+            C_Timer.After(0.2, CheckAHGuiltTrip)
+        end)
+        AuctionHouseFrame.CommoditiesBuyFrame:HookScript("OnHide", HideGuiltOverlay)
+    end
+
+    -- Hook item buy frame
+    if AuctionHouseFrame.ItemBuyFrame then
+        AuctionHouseFrame.ItemBuyFrame:HookScript("OnShow", function()
+            C_Timer.After(0.2, CheckAHGuiltTrip)
+        end)
+        AuctionHouseFrame.ItemBuyFrame:HookScript("OnHide", HideGuiltOverlay)
+    end
+
+    -- Hook commodity search results to catch item changes
+    local ahEventFrame = CreateFrame("Frame")
+    ahEventFrame:RegisterEvent("COMMODITY_SEARCH_RESULTS_UPDATED")
+    ahEventFrame:RegisterEvent("ITEM_SEARCH_RESULTS_UPDATED")
+    ahEventFrame:RegisterEvent("AUCTION_HOUSE_BROWSE_RESULTS_UPDATED")
+    ahEventFrame:SetScript("OnEvent", function(_, event, arg1)
+        if event == "COMMODITY_SEARCH_RESULTS_UPDATED" and arg1 then
+            ahLastCommodityItemID = arg1
+        end
+        C_Timer.After(0.3, CheckAHGuiltTrip)
+    end)
+
+    -- Clean up when AH closes
+    AuctionHouseFrame:HookScript("OnHide", function()
+        HideGuiltOverlay()
+        ahLastCommodityItemID = nil
+    end)
 end
